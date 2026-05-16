@@ -19,7 +19,7 @@ This app follows that cadence:
 - Default `CACHE_TTL_MS` -> `300000` ms, or 5 minutes
 - Browser auto-refresh -> the next `:00`, `:05`, `:10`, `:15`, etc. 5-minute clock boundary, shown in the app as SGT
 - HTTP cache expiry -> `max-age` is calculated to expire at the next 5-minute boundary, rather than 5 minutes after a random page load
-- If a live refresh fails after a previous successful live fetch, the server returns the last cached live payload with a warning
+- If a live refresh fails after a previous successful live fetch, the server logs the failure and returns the last cached live payload without showing a frontend warning
 - If no `LTA_ACCOUNT_KEY` is configured, the app uses `public/data/sample-chargers.json`
 
 This means normal production traffic should make roughly one LTA batch refresh per running server process at each 5-minute boundary, not one LTA call per user. A cold server with no live cache may still warm itself on the first request so the website can show data immediately.
@@ -164,7 +164,7 @@ Expected live health response:
 - If traffic grows, add Redis and move the `/api/chargers` cache there before scaling horizontally.
 - Do not log `LTA_ACCOUNT_KEY`.
 - If `/api/chargers` returns `source: "sample"`, either the key is missing or the live LTA call failed before any live cache existed.
-- If it returns `sourceLabel: "Cached LTA DataMall"`, users are seeing the last successful live payload while a refresh problem is present.
+- If `cache.status` is `stale`, users are seeing the last successful live payload while a refresh problem is present; the public UI still fills silently and the failure is logged server-side.
 - LTA's published API threshold is high, but the correct pattern is still to cache because this specific feed only updates every 5 minutes.
 
 ## Provider App Links

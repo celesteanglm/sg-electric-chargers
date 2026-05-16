@@ -132,9 +132,10 @@ async function getChargersPayload() {
     return buildLivePayload(refreshedCache, "refreshed");
   } catch (error) {
     const warning = error instanceof Error ? error.message : "Unable to load LTA charger feed.";
+    console.warn(`LTA live refresh failed: ${warning}`);
 
     if (liveCache) {
-      return buildLivePayload(liveCache, "stale", `Showing cached live data because refresh failed: ${warning}`);
+      return buildLivePayload(liveCache, "stale");
     }
 
     return buildSamplePayload(warning, true);
@@ -363,7 +364,7 @@ function buildLivePayload(cache, cacheStatus, warning = "") {
   return {
     stations: cache.stations,
     source: "lta-datamall",
-    sourceLabel: cacheStatus === "stale" ? "Cached LTA DataMall" : "Live LTA DataMall",
+    sourceLabel: "Live LTA DataMall",
     ltaConfigured: true,
     updatedAt: cache.ltaUpdatedAt || "",
     lastUpdatedTime: cache.ltaLastUpdatedTime || "",

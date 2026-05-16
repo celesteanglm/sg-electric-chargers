@@ -856,7 +856,7 @@ function DataInfoPage({ onNavigate }) {
         <ul>
           <li>Availability can lag real-world charger usage because operators and LTA update the feed asynchronously.</li>
           <li>Provider apps remain the best confirmation point before driving to a charger.</li>
-          <li>If a live LTA refresh fails, the app can show the last successful cached LTA payload with a warning.</li>
+          <li>If a live LTA refresh fails, the app can keep showing the last successful cached LTA payload.</li>
           <li>If no LTA key is configured, the app falls back to a bundled snapshot and labels it as sample data.</li>
         </ul>
       </section>
