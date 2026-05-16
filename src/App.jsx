@@ -8,6 +8,7 @@ import {
   Filter,
   Info,
   LocateFixed,
+  Mail,
   MapPin,
   Navigation,
   PlugZap,
@@ -18,9 +19,19 @@ import { normalizeChargerStations, stationSearchText } from "./lib/chargers.js";
 import { canOpenProviderApp, getProviderAppTarget, getProviderProfile, openProviderApp } from "./data/providerApps.js";
 
 const SINGAPORE_CENTER = [1.3521, 103.8198];
+const AREA_CENTER = { latitude: SINGAPORE_CENTER[0], longitude: SINGAPORE_CENTER[1] };
 const DEFAULT_ZOOM = 11;
-const CLIENT_REFRESH_MS = 60 * 60 * 1000;
+const CLIENT_REFRESH_MS = 5 * 60 * 1000;
+const SG_TIME_ZONE = "Asia/Singapore";
+const FEEDBACK_EMAIL = "celesteanglm@gmail.com";
 const SHEET_DRAG_THRESHOLD_PX = 44;
+const AREA_FILTERS = [
+  { id: "north", label: "North", color: "#17875a", textColor: "#ffffff" },
+  { id: "south", label: "South", color: "#0f4c81", textColor: "#ffffff" },
+  { id: "east", label: "East", color: "#f97316", textColor: "#17201c" },
+  { id: "west", label: "West", color: "#7c3aed", textColor: "#ffffff" },
+  { id: "central", label: "Central", color: "#08a7d8", textColor: "#06283a" },
+];
 const UTILITY_FILTERS = [
   { id: "all", label: "All", Icon: CircleDot, color: "#08283f", textColor: "#ffffff" },
   { id: "available", label: "Open now", Icon: BatteryCharging, color: "#18bf73", textColor: "#073825" },
@@ -45,6 +56,8 @@ export default function App() {
   const mapRef = useRef(null);
   const sheetTouchStartY = useRef(null);
   const sheetDidDrag = useRef(false);
+  const areaFilters = useMemo(() => buildAreaFilterOptions(stations), [stations]);
+  const activeAreaFilter = areaFilters.find((item) => item.id === filter);
   const operatorFilters = useMemo(() => buildOperatorFilterOptions(stations), [stations]);
   const activeOperatorFilter = operatorFilters.find((item) => item.id === filter);
   const utilityFilterCounts = useMemo(
@@ -124,17 +137,21 @@ export default function App() {
         filter === "all" ||
         (filter === "available" && station.status === "available") ||
         (filter === "fast" && station.maxPowerKw >= 43) ||
+        (activeAreaFilter && getStationArea(station).id === activeAreaFilter.areaId) ||
         (activeOperatorFilter && hasProviderName(station, activeOperatorFilter.operatorName));
 
       return matchesSearch && matchesFilter;
     });
-  }, [activeOperatorFilter, filter, query, stations]);
+  }, [activeAreaFilter, activeOperatorFilter, filter, query, stations]);
 
   useEffect(() => {
-    if (filter.startsWith("operator:") && !operatorFilters.some((item) => item.id === filter)) {
+    if (
+      (filter.startsWith("operator:") && !operatorFilters.some((item) => item.id === filter)) ||
+      (filter.startsWith("area:") && !areaFilters.some((item) => item.id === filter))
+    ) {
       setFilter("all");
     }
-  }, [filter, operatorFilters]);
+  }, [areaFilters, filter, operatorFilters]);
 
   useEffect(() => {
     setLocationNotice("");
@@ -236,6 +253,11 @@ export default function App() {
   const openConnectorCount = filteredStations.reduce((sum, station) => sum + station.availableCount, 0);
   const totalConnectors = filteredStations.reduce((sum, station) => sum + station.totalCount, 0);
   const feedUpdatedLabel = formatFeedTime(feed.updatedAt);
+  const feedbackHref = getFeedbackMailto({
+    filterLabel: getActiveFilterLabel(filter, areaFilters, operatorFilters),
+    query,
+    visibleCount: filteredStations.length,
+  });
 
   return (
     <main className="app-shell">
@@ -259,9 +281,15 @@ export default function App() {
                   : `${filteredStations.length} visible · ${openConnectorCount} open plugs`}
               </p>
             </div>
-            <button className="icon-button" type="button" onClick={handleLocateMe} aria-label="Use my location">
-              <LocateFixed size={19} />
-            </button>
+            <div className="brand-actions">
+              <a className="icon-button feedback-button" href={feedbackHref} aria-label="Send feedback">
+                <Mail size={17} />
+                <span className="feedback-label">Feedback</span>
+              </a>
+              <button className="icon-button" type="button" onClick={handleLocateMe} aria-label="Use my location">
+                <LocateFixed size={19} />
+              </button>
+            </div>
           </div>
 
           <label className="search-box">
@@ -289,6 +317,17 @@ export default function App() {
               <UtilityFilterChip
                 active={item.id === filter}
                 count={utilityFilterCounts[item.id]}
+                item={item}
+                key={item.id}
+                onSelect={() => setFilter(item.id)}
+              />
+            ))}
+            <span className="filter-divider" aria-hidden="true" />
+            {areaFilters.map((item) => (
+              <UtilityFilterChip
+                active={item.id === filter}
+                ariaLabel={`Filter ${item.label} area. ${item.availableCount} open plugs across ${item.stationCount} stations.`}
+                count={item.availableCount}
                 item={item}
                 key={item.id}
                 onSelect={() => setFilter(item.id)}
@@ -529,8 +568,8 @@ function ProviderBadge({ providerName, compact = false }) {
   );
 }
 
-function UtilityFilterChip({ item, active, count, onSelect }) {
-  const Icon = item.Icon;
+function UtilityFilterChip({ item, active, count, onSelect, ariaLabel }) {
+  const Icon = item.Icon || MapPin;
 
   return (
     <button
@@ -541,13 +580,14 @@ function UtilityFilterChip({ item, active, count, onSelect }) {
       }}
       type="button"
       onClick={onSelect}
+      aria-label={ariaLabel}
       aria-pressed={active}
     >
       <span className="chip-icon" aria-hidden="true">
         <Icon size={14} />
       </span>
       <span>{item.label}</span>
-      <span className="chip-count">{count}</span>
+      <span className="chip-count">{formatCompactCount(count)}</span>
     </button>
   );
 }
@@ -565,7 +605,7 @@ function OperatorFilterChip({ item, active, onSelect }) {
       }}
       type="button"
       onClick={onSelect}
-      aria-label={`Filter by operator ${item.operatorName}. ${item.stationCount} stations.`}
+      aria-label={`Filter by operator ${item.operatorName}. ${item.availableCount} open plugs across ${item.stationCount} stations.`}
       aria-pressed={active}
       title={item.operatorName}
     >
@@ -578,7 +618,7 @@ function OperatorFilterChip({ item, active, onSelect }) {
       </span>
       <span className="operator-chip-copy">
         <span className="operator-chip-name">{item.label}</span>
-        <span className="operator-chip-count">{item.stationCount} sites</span>
+        <span className="operator-chip-count">{formatCompactCount(item.availableCount)} open plugs</span>
       </span>
     </button>
   );
@@ -677,16 +717,53 @@ function getGoogleMapsUrl(station) {
   return `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving&dir_action=navigate&destination_name=${destinationName}`;
 }
 
+function getFeedbackMailto({ filterLabel, query, visibleCount }) {
+  const subject = encodeURIComponent("BoCharge feedback");
+  const body = encodeURIComponent(
+    [
+      "Hi, I have feedback about BoCharge:",
+      "",
+      `Current filter: ${filterLabel || "All"}`,
+      `Current search: ${query || "None"}`,
+      `Visible results: ${visibleCount}`,
+      "",
+    ].join("\n"),
+  );
+
+  return `mailto:${FEEDBACK_EMAIL}?subject=${subject}&body=${body}`;
+}
+
+function getActiveFilterLabel(filter, areaFilters, operatorFilters) {
+  const utilityFilter = UTILITY_FILTERS.find((item) => item.id === filter);
+  if (utilityFilter) return utilityFilter.label;
+
+  const areaFilter = areaFilters.find((item) => item.id === filter);
+  if (areaFilter) return areaFilter.label;
+
+  const operatorFilter = operatorFilters.find((item) => item.id === filter);
+  if (operatorFilter) return operatorFilter.label;
+
+  return "All";
+}
+
 function formatFeedTime(value) {
   if (!value) return "Freshness TBC";
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Updated recently";
 
-  return `Updated ${date.toLocaleTimeString([], {
-    hour: "2-digit",
+  const parts = new Intl.DateTimeFormat("en-SG", {
+    timeZone: SG_TIME_ZONE,
+    hour: "numeric",
     minute: "2-digit",
-  })}`;
+    hour12: true,
+  }).formatToParts(date);
+  const hour = parts.find((part) => part.type === "hour")?.value || "0";
+  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
+  const dayPeriod = (parts.find((part) => part.type === "dayPeriod")?.value || "").toLowerCase().replaceAll(".", "");
+  const roundedMinute = Math.floor(minute / 5) * 5;
+
+  return `Updated ${hour}.${String(roundedMinute).padStart(2, "0")}${dayPeriod} SGT`;
 }
 
 function getStationPayload(payload) {
@@ -708,6 +785,36 @@ function uniqueProviderNames(providers) {
     seen.add(normalized);
     return true;
   });
+}
+
+function buildAreaFilterOptions(stations) {
+  const areaStats = new Map(
+    AREA_FILTERS.map((area) => [
+      area.id,
+      {
+        id: `area:${area.id}`,
+        areaId: area.id,
+        label: area.label,
+        color: area.color,
+        textColor: area.textColor,
+        stationCount: 0,
+        availableCount: 0,
+        totalCount: 0,
+      },
+    ]),
+  );
+
+  stations.forEach((station) => {
+    const area = getStationArea(station);
+    const existing = areaStats.get(area.id);
+    if (!existing) return;
+
+    existing.stationCount += 1;
+    existing.availableCount += station.availableCount;
+    existing.totalCount += station.totalCount;
+  });
+
+  return AREA_FILTERS.map((area) => areaStats.get(area.id)).filter((area) => area.stationCount > 0);
 }
 
 function buildOperatorFilterOptions(stations) {
@@ -743,9 +850,31 @@ function buildOperatorFilterOptions(stations) {
   });
 
   return [...operators.values()].sort((a, b) => {
+    if (b.availableCount !== a.availableCount) return b.availableCount - a.availableCount;
+    if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
     if (b.stationCount !== a.stationCount) return b.stationCount - a.stationCount;
     return a.label.localeCompare(b.label);
   });
+}
+
+function getStationArea(station) {
+  const latDelta = station.latitude - AREA_CENTER.latitude;
+  const lngDelta = station.longitude - AREA_CENTER.longitude;
+  const centralLatSpan = 0.035;
+  const centralLngSpan = 0.045;
+
+  if (Math.abs(latDelta) <= centralLatSpan && Math.abs(lngDelta) <= centralLngSpan) {
+    return { id: "central", label: "Central" };
+  }
+
+  const latitudeWeight = Math.abs(latDelta) / 0.09;
+  const longitudeWeight = Math.abs(lngDelta) / 0.13;
+
+  if (latitudeWeight >= longitudeWeight) {
+    return latDelta >= 0 ? { id: "north", label: "North" } : { id: "south", label: "South" };
+  }
+
+  return lngDelta >= 0 ? { id: "east", label: "East" } : { id: "west", label: "West" };
 }
 
 function hasProviderName(station, providerName) {
@@ -820,6 +949,10 @@ function getOperatorInitials(operatorName) {
     .map((word) => word[0])
     .join("")
     .toUpperCase();
+}
+
+function formatCompactCount(value) {
+  return Number(value || 0).toLocaleString();
 }
 
 function toArray(value) {

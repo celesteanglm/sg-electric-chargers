@@ -1,4 +1,6 @@
-const PROVIDERS = [
+import { PROVIDER_APP_STORE_MAPPINGS } from "./providerAppStoreMappings.js";
+
+const PROVIDER_PROFILES = [
   {
     key: "sp",
     shortName: "SP",
@@ -8,10 +10,6 @@ const PROVIDERS = [
     brandTextColor: "#ffffff",
     assetSourceUrl: "https://www.spdigital.sg/spapp/ev-charging",
     matches: ["sp", "singapore power", "sp group"],
-    appleId: "596749130",
-    androidPackage: "sg.com.singaporepower.spservices",
-    appStore: "https://apps.apple.com/sg/app/sp-utilities-ev-charging/id596749130",
-    playStore: "https://play.google.com/store/apps/details?id=sg.com.singaporepower.spservices",
     website: "https://www.spgroup.com.sg/for-individuals/electric-vehicle-charging",
   },
   {
@@ -25,10 +23,6 @@ const PROVIDERS = [
     logoAlt: "Shell",
     assetSourceUrl: "https://eve.com.sg/hubfs/shell-logo-light.svg",
     matches: ["shell", "shell recharge"],
-    appleId: "6458189524",
-    androidPackage: "com.zecosystems.shellrechargeasia",
-    appStore: "https://apps.apple.com/sg/app/shell-recharge-asia/id6458189524",
-    playStore: "https://play.google.com/store/apps/details?id=com.zecosystems.shellrechargeasia",
     website: "https://www.shell.com.sg/motorists/shell-recharge.html",
   },
   {
@@ -40,26 +34,18 @@ const PROVIDERS = [
     brandTextColor: "#ffffff",
     assetSourceUrl: "https://eve.com.sg/",
     matches: ["charge+", "charge plus", "chargeplus"],
-    appleId: "1481750244",
-    androidPackage: "com.chargeplus.chargeapp",
-    appStore: "https://apps.apple.com/sg/app/charge/id1481750244",
-    playStore: "https://play.google.com/store/apps/details?id=com.chargeplus.chargeapp",
     website: "https://chargeplus.com",
   },
   {
     key: "cdg",
     shortName: "CDG",
-    appName: "CDG Zig",
+    appName: "CDG ENGIE",
     markerLabel: "CDG",
     brandColor: "#1b65c9",
     brandTextColor: "#ffffff",
     assetSourceUrl: "https://eve.com.sg/",
     matches: ["cdg", "comfortdelgro", "engie"],
-    appleId: "954951647",
-    androidPackage: "com.codigo.comfort",
-    appStore: "https://apps.apple.com/sg/app/cdg-zig-taxis-cars/id954951647",
-    playStore: "https://play.google.com/store/apps/details?id=com.codigo.comfort",
-    website: "https://www.cdgtaxi.com.sg/cdg-zig/",
+    website: "https://cdgengie.com/",
   },
   {
     key: "strides",
@@ -69,8 +55,6 @@ const PROVIDERS = [
     brandColor: "#134e8a",
     brandTextColor: "#ffffff",
     matches: ["strides ytl", "strides"],
-    appleId: "1664718768",
-    appStore: "https://apps.apple.com/sg/app/chargeco/id1664718768",
     website: "https://www.google.com/search?q=Strides+YTL+EV+charging+Singapore",
   },
   {
@@ -84,10 +68,6 @@ const PROVIDERS = [
     logoAlt: "Kigo",
     assetSourceUrl: "https://www.kigo.app/",
     matches: ["kigo", "eigen"],
-    appleId: "1616117249",
-    androidPackage: "app.kigo.customer",
-    appStore: "https://apps.apple.com/sg/app/kigo-app/id1616117249",
-    playStore: "https://play.google.com/store/apps/details?id=app.kigo.customer",
     website: "https://kigo.app",
   },
   {
@@ -101,8 +81,6 @@ const PROVIDERS = [
     logoAlt: "Volt",
     assetSourceUrl: "https://www.keppelvolt.com/about/",
     matches: ["volt"],
-    appleId: "1606309147",
-    appStore: "https://apps.apple.com/sg/app/volt-ev-charging/id1606309147",
     website: "https://www.volt.sg",
   },
   {
@@ -114,10 +92,6 @@ const PROVIDERS = [
     brandTextColor: "#ffffff",
     assetSourceUrl: "https://www.tesla.com/en_sg/supercharger",
     matches: ["tesla"],
-    appleId: "582007913",
-    androidPackage: "com.teslamotors.tesla",
-    appStore: "https://apps.apple.com/sg/app/tesla/id582007913",
-    playStore: "https://play.google.com/store/apps/details?id=com.teslamotors.tesla",
     website: "https://www.tesla.com/en_sg/supercharger",
   },
   {
@@ -128,8 +102,6 @@ const PROVIDERS = [
     brandColor: "#5f6f69",
     brandTextColor: "#ffffff",
     matches: ["mnl solutions", "mnl"],
-    appleId: "1597892677",
-    appStore: "https://apps.apple.com/sg/app/ev-charge-by-mnl/id1597892677",
     website: "https://www.google.com/search?q=MNL+Solutions+EV+charging+Singapore",
   },
   {
@@ -140,8 +112,6 @@ const PROVIDERS = [
     brandColor: "#2563eb",
     brandTextColor: "#ffffff",
     matches: ["ev mobility"],
-    appleId: "1572430525",
-    appStore: "https://apps.apple.com/sg/app/juice/id1572430525",
     website: "https://www.google.com/search?q=EV+Mobility+EV+charging+Singapore",
   },
   {
@@ -152,8 +122,6 @@ const PROVIDERS = [
     brandColor: "#f97316",
     brandTextColor: "#17201c",
     matches: ["fastparkncharge", "fast park n charge", "fast park ncharge"],
-    appleId: "6447027292",
-    appStore: "https://apps.apple.com/sg/app/fastparkncharge/id6447027292",
     website: "https://www.google.com/search?q=FastParkNCharge+EV+charging+Singapore",
   },
   {
@@ -164,8 +132,6 @@ const PROVIDERS = [
     brandColor: "#0f766e",
     brandTextColor: "#ffffff",
     matches: ["ked energy"],
-    appleId: "6593664370",
-    appStore: "https://apps.apple.com/sg/app/striked/id6593664370",
     website: "https://www.google.com/search?q=KED+Energy+EV+charging+Singapore",
   },
   {
@@ -176,8 +142,6 @@ const PROVIDERS = [
     brandColor: "#7c3aed",
     brandTextColor: "#ffffff",
     matches: ["novowatt", "novo watt"],
-    appleId: "1617293408",
-    appStore: "https://apps.apple.com/sg/app/watt-ev-charging/id1617293408",
     website: "https://www.google.com/search?q=Novowatt+EV+charging+Singapore",
   },
   {
@@ -208,8 +172,6 @@ const PROVIDERS = [
     brandColor: "#dc2626",
     brandTextColor: "#ffffff",
     matches: ["city energy go", "city energy"],
-    appleId: "1615899785",
-    appStore: "https://apps.apple.com/sg/app/city-energy-go/id1615899785",
     website: "https://www.cityenergy.com.sg/",
   },
   {
@@ -260,8 +222,6 @@ const PROVIDERS = [
     brandColor: "#65a30d",
     brandTextColor: "#ffffff",
     matches: ["eneready", "ene ready"],
-    appleId: "1612599603",
-    appStore: "https://apps.apple.com/sg/app/eneready/id1612599603",
     website: "https://www.google.com/search?q=ENEReady+EV+charging+Singapore",
   },
   {
@@ -272,8 +232,6 @@ const PROVIDERS = [
     brandColor: "#475569",
     brandTextColor: "#ffffff",
     matches: ["busways"],
-    appleId: "1586084485",
-    appStore: "https://apps.apple.com/sg/app/bev/id1586084485",
     website: "https://www.google.com/search?q=Busways+EV+charging+Singapore",
   },
   {
@@ -294,8 +252,6 @@ const PROVIDERS = [
     brandColor: "#0d9488",
     brandTextColor: "#ffffff",
     matches: ["wes cares", "wescares"],
-    appleId: "6468880863",
-    appStore: "https://apps.apple.com/sg/app/wes-cares/id6468880863",
     website: "https://www.google.com/search?q=WES+Cares+EV+charging+Singapore",
   },
   {
@@ -331,7 +287,7 @@ const PROVIDERS = [
   {
     key: "uniongas",
     shortName: "UG",
-    appName: "Union Gas",
+    appName: "Union Charge",
     markerLabel: "UG",
     brandColor: "#b91c1c",
     brandTextColor: "#ffffff",
@@ -341,16 +297,19 @@ const PROVIDERS = [
   {
     key: "iwow",
     shortName: "IWOW",
-    appName: "IWOW Technology",
+    appName: "iCharge.SG",
     markerLabel: "IWOW",
     brandColor: "#334155",
     brandTextColor: "#ffffff",
     matches: ["iwow technology", "iwow"],
-    appleId: "6743070284",
-    appStore: "https://apps.apple.com/sg/app/icharge-sg/id6743070284",
     website: "https://www.google.com/search?q=IWOW+Technology+EV+charging+Singapore",
   },
 ];
+
+const PROVIDERS = PROVIDER_PROFILES.map((provider) => ({
+  ...provider,
+  ...getProviderStoreTarget(provider.key),
+}));
 
 const UNKNOWN_PROVIDER = {
   key: "unknown",
@@ -362,6 +321,19 @@ const UNKNOWN_PROVIDER = {
   matches: [],
   website: "https://www.google.com/search?q=Singapore+EV+charging+app",
 };
+
+function getProviderStoreTarget(providerKey) {
+  const mapping = PROVIDER_APP_STORE_MAPPINGS[providerKey] || {};
+  const appleId = mapping.appleStoreId || "";
+  const androidPackage = mapping.googlePlayId || "";
+
+  return {
+    appleId,
+    androidPackage,
+    appStore: appleId ? `https://apps.apple.com/sg/app/id${appleId}` : "",
+    playStore: androidPackage ? `https://play.google.com/store/apps/details?id=${androidPackage}` : "",
+  };
+}
 
 export function getProviderKey(providerName) {
   return getProviderProfile(providerName).key;

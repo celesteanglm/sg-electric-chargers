@@ -11,7 +11,7 @@ const samplePath = path.join(rootDir, "public", "data", "sample-chargers.json");
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || "0.0.0.0";
 const ltaAccountKey = process.env.LTA_ACCOUNT_KEY;
-const cacheTtlMs = Number(process.env.CACHE_TTL_MS || 60 * 60 * 1000);
+const cacheTtlMs = Number(process.env.CACHE_TTL_MS || 5 * 60 * 1000);
 
 let liveCache = null;
 let liveRefreshPromise = null;
@@ -29,8 +29,9 @@ app.get("/api/health", (_req, res) => {
 
 app.get("/api/chargers", async (_req, res) => {
   const payload = await getChargersPayload();
+  const maxAgeSeconds = Math.max(0, Math.round(cacheTtlMs / 1000));
 
-  res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=900");
+  res.set("Cache-Control", `public, max-age=${maxAgeSeconds}, stale-while-revalidate=60`);
   res.json(payload);
 });
 

@@ -96,7 +96,7 @@ button {
 
 .brand-row {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr) 42px;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   min-height: 74px;
@@ -185,6 +185,12 @@ button {
   box-shadow: 0 0 0 4px rgba(255, 212, 59, 0.22);
 }
 
+.brand-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .icon-button {
   display: grid;
   place-items: center;
@@ -205,6 +211,16 @@ button {
   background: #eaf8fb;
   box-shadow: 0 8px 16px rgba(8, 40, 63, 0.12);
   transform: translateY(-1px);
+}
+
+.feedback-button {
+  grid-auto-flow: column;
+  gap: 6px;
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
 }
 
 .search-box {
@@ -1168,7 +1184,7 @@ button {
   }
 
   .brand-row {
-    grid-template-columns: 50px minmax(0, 1fr) 40px;
+    grid-template-columns: 50px minmax(0, 1fr) auto;
     min-height: 64px;
     gap: 10px;
   }
@@ -1195,6 +1211,19 @@ button {
     min-height: 22px;
     padding: 0 7px;
     font-size: 10px;
+  }
+
+  .brand-actions {
+    gap: 5px;
+  }
+
+  .feedback-button {
+    width: 38px;
+    padding: 0;
+  }
+
+  .feedback-label {
+    display: none;
   }
 
   .filter-scroller {
@@ -1345,7 +1374,7 @@ button {
   }
 
   .brand-row {
-    grid-template-columns: 46px minmax(0, 1fr) 38px;
+    grid-template-columns: 46px minmax(0, 1fr) auto;
     gap: 8px;
   }
 

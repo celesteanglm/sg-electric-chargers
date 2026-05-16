@@ -17,11 +17,22 @@ This app follows that cadence:
 - Browser -> `GET /api/chargers`
 - Server -> calls LTA only when the in-memory cache is older than `CACHE_TTL_MS`
 - Default `CACHE_TTL_MS` -> `300000` ms, or 5 minutes
-- Browser auto-refresh -> every 60 seconds, but those refreshes hit the server cache instead of hammering LTA
+- Browser auto-refresh -> every 5 minutes, matching the LTA feed cadence
 - If a live refresh fails after a previous successful live fetch, the server returns the last cached live payload with a warning
 - If no `LTA_ACCOUNT_KEY` is configured, the app uses `public/data/sample-chargers.json`
 
 This means normal production traffic should make roughly one LTA batch refresh per running server process every 5 minutes, not one LTA call per user.
+
+## Region Filters
+
+The LTA EV Charging Points Batch feed includes latitude and longitude for each station, but it does not include a named planning region such as North, South, East, West, or Central. The app derives those area filters client-side from coordinates:
+
+- Central stations are those close to the Singapore map center, currently within `0.035` latitude and `0.045` longitude of `1.3521, 103.8198`.
+- Remaining stations are assigned to North/South/East/West by comparing their normalized latitude and longitude distance from that center.
+- If the north/south distance is stronger, the latitude decides North or South.
+- If the east/west distance is stronger, the longitude decides East or West.
+
+These are lightweight geographic buckets for filtering and should not be treated as official URA, postal-sector, or LTA region boundaries. If exact administrative regions become important, add a polygon dataset and test each charger coordinate against those polygons.
 
 ## Key Handling
 
@@ -129,7 +140,7 @@ Expected live health response:
 
 ## Provider App Links
 
-Provider app mappings live in `src/data/providerApps.js`. The mobile CTA uses OS-aware store handoff for iOS and Android. If a provider publishes a stable app-specific deep link later, add it in that file without touching the map UI.
+Provider app store IDs live in `src/data/providerAppStoreMappings.js`. The mobile CTA derives App Store and Google Play URLs from that mapping, then uses OS-aware store handoff for iOS and Android. If a provider publishes a stable app-specific deep link later, add it in `src/data/providerApps.js` without touching the map UI.
 
 ## References
 
