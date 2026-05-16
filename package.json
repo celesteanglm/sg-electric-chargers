@@ -9,6 +9,8 @@
     "api": "node --watch server/index.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "data:refresh": "node scripts/refresh-sample-data.mjs",
+    "research:providers": "node scripts/research-providers.mjs",
     "start": "NODE_ENV=production node server/index.mjs"
   },
   "keywords": [],

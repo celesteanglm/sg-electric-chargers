@@ -6,6 +6,7 @@ import {
   CircleDot,
   ExternalLink,
   Filter,
+  Info,
   LocateFixed,
   MapPin,
   Navigation,
@@ -14,14 +15,15 @@ import {
   X,
 } from "lucide-react";
 import { normalizeChargerStations, stationSearchText } from "./lib/chargers.js";
-import { getProviderProfile, openProviderApp } from "./data/providerApps.js";
+import { canOpenProviderApp, getProviderProfile, openProviderApp } from "./data/providerApps.js";
 
 const SINGAPORE_CENTER = [1.3521, 103.8198];
 const DEFAULT_ZOOM = 11;
-const CLIENT_REFRESH_MS = 60 * 1000;
+const CLIENT_REFRESH_MS = 60 * 60 * 1000;
+const SHEET_DRAG_THRESHOLD_PX = 44;
 const STATUS_FILTERS = [
   { id: "all", label: "All" },
-  { id: "available", label: "Available" },
+  { id: "available", label: "Open now" },
   { id: "fast", label: "Fast" },
   { id: "sp", label: "SP" },
   { id: "shell", label: "Shell" },
@@ -41,7 +43,11 @@ export default function App() {
     cache: null,
   });
   const [userLocation, setUserLocation] = useState(null);
+  const [locationNotice, setLocationNotice] = useState("");
+  const [sheetMode, setSheetMode] = useState("expanded");
   const mapRef = useRef(null);
+  const sheetTouchStartY = useRef(null);
+  const sheetDidDrag = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -55,7 +61,7 @@ export default function App() {
         const response = await fetch("/api/chargers");
         if (!response.ok) throw new Error(`API returned ${response.status}`);
         const payload = await response.json();
-        const nextStations = normalizeChargerStations(payload.stations || payload);
+        const nextStations = getStationPayload(payload);
 
         if (!mounted) return;
 
@@ -73,7 +79,7 @@ export default function App() {
       } catch (error) {
         const response = await fetch("/data/sample-chargers.json");
         const payload = await response.json();
-        const nextStations = normalizeChargerStations(payload.stations || payload);
+        const nextStations = getStationPayload(payload);
 
         if (!mounted) return;
 
@@ -111,13 +117,17 @@ export default function App() {
         filter === "all" ||
         (filter === "available" && station.status === "available") ||
         (filter === "fast" && station.maxPowerKw >= 43) ||
-        (filter === "sp" && station.providerKey === "sp") ||
-        (filter === "shell" && station.providerKey === "shell") ||
-        (filter === "chargeplus" && station.providerKey === "chargeplus");
+        (filter === "sp" && hasProviderKey(station, "sp")) ||
+        (filter === "shell" && hasProviderKey(station, "shell")) ||
+        (filter === "chargeplus" && hasProviderKey(station, "chargeplus"));
 
       return matchesSearch && matchesFilter;
     });
   }, [filter, query, stations]);
+
+  useEffect(() => {
+    setLocationNotice("");
+  }, [filter, query]);
 
   const selectedStation =
     filteredStations.length > 0 ? filteredStations.find((station) => station.id === selectedId) || filteredStations[0] : null;
@@ -135,26 +145,84 @@ export default function App() {
 
   function selectStation(station) {
     setSelectedId(station.id);
+    setSheetMode("expanded");
     mapRef.current?.flyTo([station.latitude, station.longitude], Math.max(mapRef.current.getZoom(), 14), {
       duration: 0.35,
     });
   }
 
   function handleLocateMe() {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setLocationNotice("Location is not available in this browser.");
+      return;
+    }
+
+    setLocationNotice("");
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const nextLocation = [position.coords.latitude, position.coords.longitude];
         setUserLocation(nextLocation);
-        mapRef.current?.flyTo(nextLocation, 14, { duration: 0.45 });
+
+        if (filteredStations.length === 0) {
+          setLocationNotice("No visible chargers match the current filters.");
+          mapRef.current?.flyTo(nextLocation, 14, { duration: 0.45 });
+          return;
+        }
+
+        const nearestStation = findNearestStation(nextLocation, filteredStations);
+
+        if (!nearestStation) {
+          setLocationNotice("No visible chargers match the current filters.");
+          return;
+        }
+
+        setSelectedId(nearestStation.id);
+        setLocationNotice("Selected the nearest visible charger.");
+        mapRef.current?.flyTo([nearestStation.latitude, nearestStation.longitude], 15, { duration: 0.45 });
       },
-      () => {},
+      () => {
+        setLocationNotice("Location unavailable. Enable browser location to find the nearest charger.");
+      },
       { enableHighAccuracy: true, timeout: 8000 },
     );
   }
 
-  const availableCount = stations.reduce((sum, station) => sum + station.availableCount, 0);
+  function handleSheetTouchStart(event) {
+    sheetTouchStartY.current = event.touches[0]?.clientY ?? null;
+  }
+
+  function handleSheetTouchEnd(event) {
+    if (sheetTouchStartY.current == null) return;
+
+    const endY = event.changedTouches[0]?.clientY ?? sheetTouchStartY.current;
+    const deltaY = endY - sheetTouchStartY.current;
+    sheetTouchStartY.current = null;
+    sheetDidDrag.current = Math.abs(deltaY) > SHEET_DRAG_THRESHOLD_PX;
+
+    if (sheetDidDrag.current) {
+      window.setTimeout(() => {
+        sheetDidDrag.current = false;
+      }, 400);
+    }
+
+    if (deltaY > SHEET_DRAG_THRESHOLD_PX) {
+      setSheetMode("collapsed");
+    } else if (deltaY < -SHEET_DRAG_THRESHOLD_PX) {
+      setSheetMode("expanded");
+    }
+  }
+
+  function toggleSheetMode() {
+    if (sheetDidDrag.current) {
+      sheetDidDrag.current = false;
+      return;
+    }
+
+    setSheetMode((current) => (current === "expanded" ? "collapsed" : "expanded"));
+  }
+
+  const openConnectorCount = stations.reduce((sum, station) => sum + station.availableCount, 0);
   const totalConnectors = stations.reduce((sum, station) => sum + station.totalCount, 0);
 
   return (
@@ -166,7 +234,7 @@ export default function App() {
               <PlugZap size={20} />
             </div>
             <div>
-              <h1>ChargeSG</h1>
+              <h1>BoCharge</h1>
               <p>{feed.loading ? "Loading chargers" : `${filteredStations.length} of ${stations.length} stations`}</p>
             </div>
             <button className="icon-button" type="button" onClick={handleLocateMe} aria-label="Use my location">
@@ -203,6 +271,8 @@ export default function App() {
               </button>
             ))}
           </div>
+
+          {locationNotice ? <div className="location-notice">{locationNotice}</div> : null}
         </div>
 
         <MapContainer
@@ -230,7 +300,7 @@ export default function App() {
             >
               <Popup>
                 <strong>{station.name}</strong>
-                <span>{station.provider}</span>
+                <span>{station.providerLabel || station.provider}</span>
               </Popup>
             </Marker>
           ))}
@@ -242,51 +312,62 @@ export default function App() {
         </MapContainer>
       </section>
 
-      <section className="bottom-sheet" aria-label="Charger details and results">
-        <div className="sheet-handle" aria-hidden="true" />
-        <div className="summary-strip">
-          <StatTile label="Available" value={availableCount} tone="green" />
-          <StatTile label="Connectors" value={totalConnectors} tone="blue" />
-          <StatTile label="Source" value={feed.sourceLabel.replace(" fallback", "")} tone="dark" />
-        </div>
+      <section className={`bottom-sheet sheet-${sheetMode}`} aria-label="Charger details and results">
+        <button
+          className="sheet-handle"
+          type="button"
+          onClick={toggleSheetMode}
+          onTouchStart={handleSheetTouchStart}
+          onTouchEnd={handleSheetTouchEnd}
+          aria-expanded={sheetMode === "expanded"}
+          aria-label={sheetMode === "expanded" ? "Collapse charger details" : "Expand charger details"}
+        >
+          <span aria-hidden="true" />
+        </button>
 
-        {feed.warning ? <div className="feed-warning">{feed.warning}</div> : null}
-
-        {selectedStation ? (
-          <StationDetail station={selectedStation} onOpenApp={() => openProviderApp(selectedStation.provider)} />
-        ) : (
-          <div className="empty-state">
-            <CircleDot size={22} />
-            <p>No matching chargers found.</p>
+        <div className="sheet-content">
+          <div className="summary-strip">
+            <StatTile label="Open plugs" value={`${openConnectorCount}/${totalConnectors}`} tone="green" />
+            <StatTile label="Stations" value={stations.length} tone="blue" />
+            <StatTile label="Source" value={feed.sourceLabel.replace(" fallback", "")} tone="dark" />
           </div>
-        )}
 
-        <div className="nearby-header">
-          <span>Nearby chargers</span>
-          <span>{filteredStations.length} results</span>
-        </div>
+          {feed.warning ? <div className="feed-warning">{feed.warning}</div> : null}
 
-        <div className="station-list">
-          {filteredStations.map((station) => (
-            <button
-              className={station.id === selectedStation?.id ? "station-row active" : "station-row"}
-              key={station.id}
-              type="button"
-              onClick={() => selectStation(station)}
-            >
-              <StatusDot status={station.status} />
-              <div>
-                <strong>{station.name}</strong>
-                <span>{station.address}</span>
-              </div>
-              <div className="row-meta">
-                <span>{station.provider}</span>
-                <b>
-                  {station.availableCount}/{station.totalCount}
-                </b>
-              </div>
-            </button>
-          ))}
+          {selectedStation ? (
+            <StationDetail station={selectedStation} />
+          ) : (
+            <div className="empty-state">
+              <CircleDot size={22} />
+              <p>No matching chargers found.</p>
+            </div>
+          )}
+
+          <div className="nearby-header">
+            <span>Nearby chargers</span>
+            <span>{filteredStations.length} results</span>
+          </div>
+
+          <div className="station-list">
+            {filteredStations.map((station) => (
+              <button
+                className={station.id === selectedStation?.id ? "station-row active" : "station-row"}
+                key={station.id}
+                type="button"
+                onClick={() => selectStation(station)}
+              >
+                <StatusDot status={station.status} />
+                <div>
+                  <strong>{station.name}</strong>
+                  <span>{station.address}</span>
+                </div>
+                <div className="row-meta">
+                  <ProviderBadges providers={station.providers?.length ? station.providers : [station.provider]} compact />
+                  <b>{station.availableCount} open</b>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       </section>
     </main>
@@ -303,8 +384,11 @@ function MapBridge({ mapRef }) {
   return null;
 }
 
-function StationDetail({ station, onOpenApp }) {
-  const providerProfile = getProviderProfile(station.provider);
+function StationDetail({ station }) {
+  const providers = station.providers?.length ? station.providers : [station.provider];
+  const appProviderName = providers.find((providerName) => canOpenProviderApp(providerName)) || station.provider;
+  const providerProfile = getProviderProfile(appProviderName);
+  const providerAppAvailable = canOpenProviderApp(appProviderName);
   const bestPlug = station.plugTypes[0];
 
   return (
@@ -312,7 +396,7 @@ function StationDetail({ station, onOpenApp }) {
       <div className="detail-heading">
         <div>
           <div className="provider-line">
-            <span className={`provider-badge provider-${station.providerKey}`}>{providerProfile.shortName}</span>
+            <ProviderBadges providers={providers} />
             <StatusPill status={station.status} />
           </div>
           <h2>{station.name}</h2>
@@ -321,7 +405,7 @@ function StationDetail({ station, onOpenApp }) {
       </div>
 
       <div className="detail-grid">
-        <Metric label="Available" value={`${station.availableCount}/${station.totalCount}`} />
+        <Metric label="Open plugs" value={`${station.availableCount}/${station.totalCount}`} />
         <Metric label="Max speed" value={station.maxPowerKw ? `${station.maxPowerKw} kW` : "TBC"} />
         <Metric label="Plug" value={bestPlug?.plugType || "TBC"} />
       </div>
@@ -351,10 +435,20 @@ function StationDetail({ station, onOpenApp }) {
           Open in Google Maps
         </a>
 
-        <button className="secondary-action" type="button" onClick={onOpenApp}>
-          <ExternalLink size={18} />
-          Open {providerProfile.appName}
-        </button>
+        {providerAppAvailable ? (
+          <button className="secondary-action" type="button" onClick={() => openProviderApp(appProviderName)}>
+            <ExternalLink size={18} />
+            Open {providerProfile.appName}
+          </button>
+        ) : (
+          <div className="provider-unavailable">
+            <button className="secondary-action unavailable" type="button" disabled>
+              <Info size={18} />
+              Provider app unavailable
+            </button>
+            <p>Provider has not been identified or no app link is available.</p>
+          </div>
+        )}
       </div>
 
       <div className="connector-strip">
@@ -365,6 +459,48 @@ function StationDetail({ station, onOpenApp }) {
         ))}
       </div>
     </article>
+  );
+}
+
+function ProviderBadge({ providerName, compact = false }) {
+  const providerProfile = getProviderProfile(providerName);
+
+  return (
+    <span
+      className={compact ? "provider-badge compact" : "provider-badge"}
+      style={{
+        "--provider-color": providerProfile.brandColor,
+        "--provider-text": providerProfile.brandTextColor,
+      }}
+      title={providerName}
+    >
+      {providerProfile.logoSrc ? (
+        <img
+          className={`provider-badge-logo provider-badge-logo-${providerProfile.key}`}
+          src={providerProfile.logoSrc}
+          alt=""
+          aria-hidden="true"
+        />
+      ) : null}
+      <span>{providerProfile.shortName}</span>
+    </span>
+  );
+}
+
+function ProviderBadges({ providers, compact = false }) {
+  const providerNames = uniqueProviderNames(providers).slice(0, 4);
+
+  return (
+    <span className={compact ? "provider-stack compact" : "provider-stack"} title={uniqueProviderNames(providers).join(" + ")}>
+      {providerNames.map((providerName) => (
+        <ProviderBadge compact={compact} key={providerName} providerName={providerName} />
+      ))}
+      {uniqueProviderNames(providers).length > providerNames.length ? (
+        <span className={compact ? "provider-more compact" : "provider-more"}>
+          +{uniqueProviderNames(providers).length - providerNames.length}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -392,8 +528,8 @@ function StatusDot({ status }) {
 
 function StatusPill({ status }) {
   const labels = {
-    available: "Available",
-    occupied: "Occupied",
+    available: "Open",
+    occupied: "In use",
     offline: "Offline",
     unknown: "Unknown",
   };
@@ -402,14 +538,27 @@ function StatusPill({ status }) {
 }
 
 function createStationIcon(station, selected) {
-  const className = ["pin", `pin-${station.status}`, selected ? "selected" : ""].join(" ");
-  const initials = station.providerInitials || station.provider.slice(0, 2).toUpperCase();
+  const providerProfile = getProviderProfile(station.provider);
+  const className = [
+    "pin",
+    `pin-provider-${providerProfile.key}`,
+    `pin-${station.status}`,
+    selected ? "selected" : "",
+  ].join(" ");
+  const label = providerProfile.markerLabel || station.providerInitials || station.provider.slice(0, 2).toUpperCase();
+  const markerContent = providerProfile.logoSrc
+    ? `<img class="pin-logo pin-logo-${providerProfile.key}" src="${escapeAttribute(providerProfile.logoSrc)}" alt="" aria-hidden="true" />`
+    : `<span class="pin-label">${escapeHtml(label)}</span>`;
+  const inlineStyle = [
+    `--provider-color: ${providerProfile.brandColor}`,
+    `--provider-text: ${providerProfile.brandTextColor}`,
+  ].join("; ");
 
   return L.divIcon({
     className: "station-marker",
-    html: `<span class="${className}"><span>${initials}</span></span>`,
-    iconSize: selected ? [44, 44] : [36, 36],
-    iconAnchor: selected ? [22, 22] : [18, 18],
+    html: `<span class="${className}" style="${inlineStyle}" title="${escapeAttribute(station.providerLabel || providerProfile.shortName)}">${markerContent}<span class="pin-status pin-status-${station.status}"></span></span>`,
+    iconSize: selected ? [36, 36] : [28, 28],
+    iconAnchor: selected ? [18, 18] : [14, 14],
   });
 }
 
@@ -426,4 +575,86 @@ function getGoogleMapsUrl(station) {
   const destination = encodeURIComponent(`${station.latitude},${station.longitude}`);
   const destinationName = encodeURIComponent(station.name || station.address || "EV charger");
   return `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving&dir_action=navigate&destination_name=${destinationName}`;
+}
+
+function getStationPayload(payload) {
+  const records = payload.stations || payload;
+
+  if (Array.isArray(records) && records.every(isNormalizedStation)) {
+    return records;
+  }
+
+  return normalizeChargerStations(records);
+}
+
+function hasProviderKey(station, providerKey) {
+  return station.providerKey === providerKey || toArray(station.providerKeys).includes(providerKey);
+}
+
+function uniqueProviderNames(providers) {
+  const seen = new Set();
+
+  return toArray(providers).filter((providerName) => {
+    const normalized = String(providerName || "").trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function toArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function isNormalizedStation(station) {
+  return (
+    station &&
+    typeof station === "object" &&
+    "providerKey" in station &&
+    "availableCount" in station &&
+    "totalCount" in station &&
+    Array.isArray(station.plugTypes)
+  );
+}
+
+function findNearestStation(location, stations) {
+  return stations.reduce((nearest, station) => {
+    const distanceMeters = getDistanceMeters(location, [station.latitude, station.longitude]);
+
+    if (!nearest || distanceMeters < nearest.distanceMeters) {
+      return { station, distanceMeters };
+    }
+
+    return nearest;
+  }, null)?.station;
+}
+
+function getDistanceMeters(start, end) {
+  const earthRadiusMeters = 6371000;
+  const startLatitude = toRadians(start[0]);
+  const endLatitude = toRadians(end[0]);
+  const deltaLatitude = toRadians(end[0] - start[0]);
+  const deltaLongitude = toRadians(end[1] - start[1]);
+  const a =
+    Math.sin(deltaLatitude / 2) * Math.sin(deltaLatitude / 2) +
+    Math.cos(startLatitude) * Math.cos(endLatitude) * Math.sin(deltaLongitude / 2) * Math.sin(deltaLongitude / 2);
+
+  return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value);
 }
