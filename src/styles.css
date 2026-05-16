@@ -117,8 +117,7 @@ button {
   line-height: 1.2;
 }
 
-.icon-button,
-.mini-nav {
+.icon-button {
   display: grid;
   place-items: center;
   width: 38px;
@@ -366,8 +365,6 @@ button {
 
 .detail-heading {
   display: grid;
-  grid-template-columns: 1fr 40px;
-  gap: 12px;
 }
 
 .provider-line {
@@ -508,20 +505,35 @@ button {
   font-weight: 800;
 }
 
-.primary-action {
+.detail-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.primary-action,
+.secondary-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   min-height: 46px;
   width: 100%;
-  color: #ffffff;
-  background: #17201c;
-  border: 0;
   border-radius: 8px;
   font-size: 15px;
   font-weight: 900;
   cursor: pointer;
+}
+
+.primary-action {
+  color: #ffffff;
+  background: #17201c;
+  border: 0;
+}
+
+.secondary-action {
+  color: var(--text);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
 }
 
 .nearby-header {
