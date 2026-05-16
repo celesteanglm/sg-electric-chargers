@@ -318,15 +318,6 @@ function StationDetail({ station, onOpenApp }) {
           <h2>{station.name}</h2>
           <p>{station.address}</p>
         </div>
-        <button
-          className="mini-nav"
-          type="button"
-          onClick={() => openDirections(station)}
-          aria-label="Open in Google Maps"
-          title="Open in Google Maps"
-        >
-          <Navigation size={18} />
-        </button>
       </div>
 
       <div className="detail-grid">
@@ -348,10 +339,17 @@ function StationDetail({ station, onOpenApp }) {
         ) : null}
       </div>
 
-      <button className="primary-action" type="button" onClick={onOpenApp}>
-        <ExternalLink size={18} />
-        Open {providerProfile.appName}
-      </button>
+      <div className="detail-actions">
+        <button className="primary-action" type="button" onClick={() => openDirections(station)}>
+          <Navigation size={18} />
+          Open in Google Maps
+        </button>
+
+        <button className="secondary-action" type="button" onClick={onOpenApp}>
+          <ExternalLink size={18} />
+          Open {providerProfile.appName}
+        </button>
+      </div>
 
       <div className="connector-strip">
         {station.plugTypes.slice(0, 4).map((plug, index) => (
