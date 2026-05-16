@@ -213,6 +213,17 @@ button {
   transform: translateY(-1px);
 }
 
+.icon-button:disabled {
+  cursor: wait;
+  opacity: 0.76;
+}
+
+.icon-button.locating {
+  color: #064b60;
+  background: #dff6fd;
+  border-color: rgba(8, 167, 216, 0.42);
+}
+
 .feedback-button {
   grid-auto-flow: column;
   gap: 6px;

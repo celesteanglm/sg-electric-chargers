@@ -78,6 +78,7 @@ export default function App() {
 function ChargerMapPage({ onNavigate }) {
   const [stations, setStations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
+  const [selectionMode, setSelectionMode] = useState("auto");
   const [query, setQuery] = useState("");
   const [selectedFilters, setSelectedFilters] = useState(createDefaultFilterState);
   const [feed, setFeed] = useState({
@@ -88,6 +89,7 @@ function ChargerMapPage({ onNavigate }) {
     cache: null,
   });
   const [userLocation, setUserLocation] = useState(null);
+  const [isLocating, setIsLocating] = useState(false);
   const [mapCenter, setMapCenter] = useState(SINGAPORE_CENTER);
   const [visibleResultCount, setVisibleResultCount] = useState(RESULT_PAGE_SIZE);
   const [locationNotice, setLocationNotice] = useState("");
@@ -191,22 +193,7 @@ function ChargerMapPage({ onNavigate }) {
   }, [activeAreaIds, activeOperatorIds, query, selectedFilters.availableOnly, selectedFilters.fastOnly, stations]);
 
   const rankingOrigin = userLocation || mapCenter;
-  const rankedStations = useMemo(
-    () =>
-      filteredStations
-        .map((station) => ({
-          station,
-          distanceMeters: getDistanceMeters(rankingOrigin, [station.latitude, station.longitude]),
-        }))
-        .sort((a, b) => {
-          if (a.distanceMeters !== b.distanceMeters) return a.distanceMeters - b.distanceMeters;
-          if (a.station.availableCount !== b.station.availableCount) {
-            return b.station.availableCount - a.station.availableCount;
-          }
-          return a.station.name.localeCompare(b.station.name);
-        }),
-    [filteredStations, rankingOrigin],
-  );
+  const rankedStations = useMemo(() => rankStationsByDistance(rankingOrigin, filteredStations), [filteredStations, rankingOrigin]);
 
   const visibleRankedStations = rankedStations.slice(0, visibleResultCount);
   const hasMoreResults = visibleRankedStations.length < rankedStations.length;
@@ -236,6 +223,7 @@ function ChargerMapPage({ onNavigate }) {
 
   useEffect(() => {
     setLocationNotice("");
+    setSelectionMode("auto");
   }, [query, selectedFilters]);
 
   useEffect(() => {
@@ -253,16 +241,22 @@ function ChargerMapPage({ onNavigate }) {
       return;
     }
 
-    if (!selectedId || !filteredStations.some((station) => station.id === selectedId)) {
-      setSelectedId(rankedStations[0]?.station.id || null);
-    }
-  }, [filteredStations, rankedStations, selectedId]);
+    const nearestVisibleStationId = rankedStations[0]?.station.id || null;
+    setSelectedId((current) => {
+      if (selectionMode === "manual" && current && filteredStations.some((station) => station.id === current)) {
+        return current;
+      }
+
+      return nearestVisibleStationId;
+    });
+  }, [filteredStations, rankedStations, selectionMode]);
 
   const handleMapCenterChange = useCallback((nextCenter) => {
     setMapCenter((current) => (isSameMapCenter(current, nextCenter) ? current : nextCenter));
   }, []);
 
   function selectStation(station) {
+    setSelectionMode("manual");
     setSelectedId(station.id);
     setSheetMode("expanded");
     mapRef.current?.flyTo([station.latitude, station.longitude], Math.max(mapRef.current.getZoom(), 14), {
@@ -271,39 +265,57 @@ function ChargerMapPage({ onNavigate }) {
   }
 
   function handleLocateMe() {
+    if (isLocating) return;
+
     if (!navigator.geolocation) {
       setLocationNotice("Location is not available in this browser.");
       return;
     }
 
-    setLocationNotice("");
+    setIsLocating(true);
+    setLocationNotice("Finding your precise location...");
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const nextLocation = [position.coords.latitude, position.coords.longitude];
+        const locationAccuracyLabel = formatAccuracyMeters(position.coords.accuracy);
         setUserLocation(nextLocation);
 
         if (filteredStations.length === 0) {
           setLocationNotice("No visible chargers match the current filters.");
-          mapRef.current?.flyTo(nextLocation, 14, { duration: 0.45 });
+          mapRef.current?.flyTo(nextLocation, 16, { duration: 0.45 });
+          setIsLocating(false);
           return;
         }
 
-        const nearestStation = findNearestStation(nextLocation, filteredStations);
+        const nearestStation = rankStationsByDistance(nextLocation, filteredStations)[0]?.station;
 
         if (!nearestStation) {
           setLocationNotice("No visible chargers match the current filters.");
+          setIsLocating(false);
           return;
         }
 
+        setSelectionMode("auto");
         setSelectedId(nearestStation.id);
-        setLocationNotice("Selected the nearest visible charger.");
-        mapRef.current?.flyTo([nearestStation.latitude, nearestStation.longitude], 15, { duration: 0.45 });
+        setVisibleResultCount(RESULT_PAGE_SIZE);
+        setSheetMode("expanded");
+        setLocationNotice(
+          [
+            "Selected the closest charger in the current filtered list.",
+            locationAccuracyLabel ? `Location accuracy: ${locationAccuracyLabel}.` : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+        zoomToLocationAndStation(mapRef.current, nextLocation, nearestStation);
+        setIsLocating(false);
       },
       () => {
         setLocationNotice("Location unavailable. Enable browser location to find the nearest charger.");
+        setIsLocating(false);
       },
-      { enableHighAccuracy: true, timeout: 8000 },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 },
     );
   }
 
@@ -405,7 +417,14 @@ function ChargerMapPage({ onNavigate }) {
                 <Mail size={17} />
                 <span className="feedback-label">Feedback</span>
               </a>
-              <button className="icon-button" type="button" onClick={handleLocateMe} aria-label="Use my location">
+              <button
+                className={isLocating ? "icon-button locating" : "icon-button"}
+                type="button"
+                onClick={handleLocateMe}
+                aria-busy={isLocating}
+                aria-label="Use my location"
+                disabled={isLocating}
+              >
                 <LocateFixed size={19} />
               </button>
             </div>
@@ -1340,16 +1359,37 @@ function isNormalizedStation(station) {
   );
 }
 
-function findNearestStation(location, stations) {
-  return stations.reduce((nearest, station) => {
-    const distanceMeters = getDistanceMeters(location, [station.latitude, station.longitude]);
+function rankStationsByDistance(origin, stations) {
+  return stations
+    .map((station) => ({
+      station,
+      distanceMeters: getDistanceMeters(origin, [station.latitude, station.longitude]),
+    }))
+    .sort((a, b) => {
+      if (a.distanceMeters !== b.distanceMeters) return a.distanceMeters - b.distanceMeters;
+      if (a.station.availableCount !== b.station.availableCount) {
+        return b.station.availableCount - a.station.availableCount;
+      }
+      return a.station.name.localeCompare(b.station.name);
+    });
+}
 
-    if (!nearest || distanceMeters < nearest.distanceMeters) {
-      return { station, distanceMeters };
-    }
+function zoomToLocationAndStation(map, location, station) {
+  if (!map) return;
 
-    return nearest;
-  }, null)?.station;
+  const stationLocation = [station.latitude, station.longitude];
+  const bounds = L.latLngBounds([location, stationLocation]);
+
+  if (bounds.getNorthEast().equals(bounds.getSouthWest())) {
+    map.flyTo(stationLocation, 17, { duration: 0.45 });
+    return;
+  }
+
+  map.flyToBounds(bounds, {
+    duration: 0.45,
+    maxZoom: 17,
+    padding: [48, 48],
+  });
 }
 
 function getDistanceMeters(start, end) {
@@ -1372,6 +1412,13 @@ function formatDistanceMeters(distanceMeters) {
   if (distanceMeters < 10000) return `${(distanceMeters / 1000).toFixed(1)} km`;
 
   return `${Math.round(distanceMeters / 1000)} km`;
+}
+
+function formatAccuracyMeters(accuracyMeters) {
+  if (!Number.isFinite(accuracyMeters) || accuracyMeters <= 0) return "";
+  if (accuracyMeters < 1000) return `+/- ${Math.round(accuracyMeters)} m`;
+
+  return `+/- ${(accuracyMeters / 1000).toFixed(1)} km`;
 }
 
 function isSameMapCenter(current, next) {
