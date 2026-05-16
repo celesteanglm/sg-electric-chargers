@@ -533,7 +533,6 @@ function ChargerMapPage({ onNavigate }) {
                 disabled={isLocating}
               >
                 <LocateFixed size={19} />
-                <span className="location-button-label">Near me</span>
               </button>
             </div>
           </div>

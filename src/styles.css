@@ -237,24 +237,37 @@ button {
 }
 
 .location-button {
-  grid-auto-flow: column;
-  gap: 7px;
-  width: auto;
-  min-width: 96px;
-  padding: 0 12px;
+  position: relative;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
   color: #ffffff;
-  background: var(--green-dark);
-  border-color: rgba(8, 115, 75, 0.5);
+  background:
+    linear-gradient(135deg, #0d9274 0%, #26b7e3 100%);
+  border-color: rgba(38, 183, 227, 0.42);
   box-shadow:
     inset 0 -3px 0 rgba(8, 40, 63, 0.2),
-    0 10px 20px rgba(8, 115, 75, 0.22);
+    0 10px 20px rgba(8, 115, 75, 0.2),
+    0 0 0 4px rgba(8, 167, 216, 0.1);
+}
+
+.location-button::after {
+  position: absolute;
+  inset: -40% -80%;
+  pointer-events: none;
+  content: "";
+  background: linear-gradient(110deg, transparent 38%, rgba(255, 255, 255, 0.58) 50%, transparent 62%);
+  transform: translateX(-58%) rotate(8deg);
+  animation: location-shimmer 4.8s ease-in-out infinite;
 }
 
 .location-button:hover {
-  background: #0a8758;
+  background:
+    linear-gradient(135deg, #0aa27e 0%, #18acd8 100%);
   box-shadow:
     inset 0 -3px 0 rgba(8, 40, 63, 0.18),
-    0 12px 22px rgba(8, 115, 75, 0.28);
+    0 12px 22px rgba(8, 115, 75, 0.28),
+    0 0 0 4px rgba(8, 167, 216, 0.16);
 }
 
 .location-button.locating {
@@ -263,11 +276,27 @@ button {
   border-color: rgba(8, 167, 216, 0.42);
 }
 
-.location-button-label {
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1;
-  white-space: nowrap;
+.location-button.locating::after {
+  display: none;
+}
+
+@keyframes location-shimmer {
+  0%,
+  68% {
+    transform: translateX(-58%) rotate(8deg);
+  }
+
+  88%,
+  100% {
+    transform: translateX(58%) rotate(8deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .location-button::after {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 .feedback-button {
@@ -1504,11 +1533,6 @@ button {
     display: none;
   }
 
-  .location-button {
-    min-width: 90px;
-    padding: 0 10px;
-  }
-
   .filter-scroller {
     gap: 7px;
     min-height: 50px;
@@ -1701,10 +1725,6 @@ button {
     width: 42px;
     min-width: 42px;
     padding: 0;
-  }
-
-  .location-button-label {
-    display: none;
   }
 
   .operator-chip {
