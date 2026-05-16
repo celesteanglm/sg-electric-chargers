@@ -1,0 +1,193 @@
+{
+  "source": "sample",
+  "sourceLabel": "Sample fallback",
+  "generatedAt": "2026-05-16T04:20:00.000Z",
+  "stations": [
+    {
+      "id": "sample-sp-hdb-hub",
+      "name": "HDB Hub Toa Payoh",
+      "address": "480 Lorong 6 Toa Payoh, Singapore 310480",
+      "postalCode": "310480",
+      "latitude": 1.3327,
+      "longitude": 103.8483,
+      "provider": "SP Group",
+      "status": 1,
+      "operationHours": "24 hours",
+      "position": "Basement car park",
+      "plugTypes": [{ "plugType": "Type 2", "powerRating": "AC", "chargingSpeed": "22", "price": "0.60", "priceType": "kWh" }],
+      "chargingPoints": [
+        {
+          "id": "HDBHUB-A",
+          "position": "B2 Lot 123",
+          "evIds": [
+            { "evCpId": "SP-HDBHUB-001", "status": 1 },
+            { "evCpId": "SP-HDBHUB-002", "status": 0 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sample-shell-rochester",
+      "name": "Shell Recharge Rochester",
+      "address": "9 Rochester Park, Singapore 139220",
+      "postalCode": "139220",
+      "latitude": 1.3054,
+      "longitude": 103.7879,
+      "provider": "Shell Recharge",
+      "status": 1,
+      "operationHours": "24 hours",
+      "position": "Forecourt",
+      "plugTypes": [{ "plugType": "CCS2", "powerRating": "DC", "chargingSpeed": "180", "price": "0.85", "priceType": "kWh" }],
+      "chargingPoints": [{ "id": "SHELL-ROC", "evIds": [{ "evCpId": "SH-ROC-001", "status": 1 }] }]
+    },
+    {
+      "id": "sample-chargeplus-jewel",
+      "name": "Jewel Changi Airport",
+      "address": "78 Airport Boulevard, Singapore 819666",
+      "postalCode": "819666",
+      "latitude": 1.3602,
+      "longitude": 103.9898,
+      "provider": "Charge+",
+      "status": 0,
+      "operationHours": "24 hours",
+      "position": "Car park B",
+      "plugTypes": [{ "plugType": "Type 2", "powerRating": "AC", "chargingSpeed": "7.4", "price": "0.62", "priceType": "kWh" }],
+      "chargingPoints": [
+        {
+          "id": "CP-JEWEL",
+          "evIds": [
+            { "evCpId": "CP-JEWEL-001", "status": 0 },
+            { "evCpId": "CP-JEWEL-002", "status": 0 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sample-cdg-vivocity",
+      "name": "VivoCity",
+      "address": "1 HarbourFront Walk, Singapore 098585",
+      "postalCode": "098585",
+      "latitude": 1.2644,
+      "longitude": 103.8223,
+      "provider": "CDG ENGIE",
+      "status": 1,
+      "operationHours": "Mall hours",
+      "position": "P2 car park",
+      "plugTypes": [{ "plugType": "Type 2", "powerRating": "AC", "chargingSpeed": "22", "price": "0.55", "priceType": "kWh" }],
+      "chargingPoints": [{ "id": "CDG-VIVO", "evIds": [{ "evCpId": "CDG-VIVO-001", "status": 1 }, { "evCpId": "CDG-VIVO-002", "status": 1 }] }]
+    },
+    {
+      "id": "sample-sp-tampines-hub",
+      "name": "Our Tampines Hub",
+      "address": "1 Tampines Walk, Singapore 528523",
+      "postalCode": "528523",
+      "latitude": 1.3525,
+      "longitude": 103.9405,
+      "provider": "SP Group",
+      "status": 1,
+      "operationHours": "24 hours",
+      "position": "B1 green zone",
+      "plugTypes": [{ "plugType": "Type 2", "powerRating": "AC", "chargingSpeed": "22", "price": "0.60", "priceType": "kWh" }],
+      "chargingPoints": [{ "id": "SP-OTH", "evIds": [{ "evCpId": "SP-OTH-001", "status": 1 }, { "evCpId": "SP-OTH-002", "status": 0 }] }]
+    },
+    {
+      "id": "sample-chargeplus-jurong-point",
+      "name": "Jurong Point",
+      "address": "1 Jurong West Central 2, Singapore 648886",
+      "postalCode": "648886",
+      "latitude": 1.3398,
+      "longitude": 103.7068,
+      "provider": "Charge+",
+      "status": 1,
+      "operationHours": "Mall hours",
+      "position": "B2 near lift lobby C",
+      "plugTypes": [{ "plugType": "Type 2", "powerRating": "AC", "chargingSpeed": "22", "price": "0.62", "priceType": "kWh" }],
+      "chargingPoints": [{ "id": "CP-JP", "evIds": [{ "evCpId": "CP-JP-001", "status": 1 }] }]
+    },
+    {
+      "id": "sample-kigo-punggol",
+      "name": "Waterway Point",
+      "address": "83 Punggol Central, Singapore 828761",
+      "postalCode": "828761",
+      "latitude": 1.4067,
+      "longitude": 103.9022,
+      "provider": "Kigo",
+      "status": 1,
+      "operationHours": "Mall hours",
+      "position": "B2 west",
+      "plugTypes": [{ "plugType": "Type 2", "powerRating": "AC", "chargingSpeed": "22", "price": "0.58", "priceType": "kWh" }],
+      "chargingPoints": [{ "id": "KIGO-WWP", "evIds": [{ "evCpId": "KG-WWP-001", "status": 1 }, { "evCpId": "KG-WWP-002", "status": 1 }] }]
+    },
+    {
+      "id": "sample-sp-causeway-point",
+      "name": "Causeway Point",
+      "address": "1 Woodlands Square, Singapore 738099",
+      "postalCode": "738099",
+      "latitude": 1.4361,
+      "longitude": 103.7859,
+      "provider": "SP Group",
+      "status": 100,
+      "operationHours": "Mall hours",
+      "position": "B3 car park",
+      "plugTypes": [{ "plugType": "Type 2", "powerRating": "AC", "chargingSpeed": "22", "price": "0.60", "priceType": "kWh" }],
+      "chargingPoints": [{ "id": "SP-CWP", "evIds": [{ "evCpId": "SP-CWP-001", "status": "" }] }]
+    },
+    {
+      "id": "sample-shell-bukit-timah",
+      "name": "Shell Bukit Timah",
+      "address": "383 Bukit Timah Road, Singapore 259727",
+      "postalCode": "259727",
+      "latitude": 1.3194,
+      "longitude": 103.8278,
+      "provider": "Shell Recharge",
+      "status": 1,
+      "operationHours": "24 hours",
+      "position": "Forecourt bay 2",
+      "plugTypes": [{ "plugType": "CCS2", "powerRating": "DC", "chargingSpeed": "120", "price": "0.85", "priceType": "kWh" }],
+      "chargingPoints": [{ "id": "SH-BT", "evIds": [{ "evCpId": "SH-BT-001", "status": 1 }] }]
+    },
+    {
+      "id": "sample-cdg-suntec",
+      "name": "Suntec City",
+      "address": "3 Temasek Boulevard, Singapore 038983",
+      "postalCode": "038983",
+      "latitude": 1.2935,
+      "longitude": 103.8572,
+      "provider": "CDG ENGIE",
+      "status": 0,
+      "operationHours": "Mall hours",
+      "position": "B1 orange zone",
+      "plugTypes": [{ "plugType": "Type 2", "powerRating": "AC", "chargingSpeed": "22", "price": "0.55", "priceType": "kWh" }],
+      "chargingPoints": [{ "id": "CDG-SUN", "evIds": [{ "evCpId": "CDG-SUN-001", "status": 0 }] }]
+    },
+    {
+      "id": "sample-tesla-mbs",
+      "name": "Marina Bay Sands",
+      "address": "10 Bayfront Avenue, Singapore 018956",
+      "postalCode": "018956",
+      "latitude": 1.2834,
+      "longitude": 103.8607,
+      "provider": "Tesla",
+      "status": 1,
+      "operationHours": "24 hours",
+      "position": "South car park",
+      "plugTypes": [{ "plugType": "CCS2", "powerRating": "DC", "chargingSpeed": "250", "price": "", "priceType": "" }],
+      "chargingPoints": [{ "id": "TSLA-MBS", "evIds": [{ "evCpId": "TSLA-MBS-001", "status": 1 }, { "evCpId": "TSLA-MBS-002", "status": 1 }] }]
+    },
+    {
+      "id": "sample-volt-alexandra",
+      "name": "Alexandra Retail Centre",
+      "address": "460 Alexandra Road, Singapore 119963",
+      "postalCode": "119963",
+      "latitude": 1.2746,
+      "longitude": 103.8011,
+      "provider": "Volt",
+      "status": 1,
+      "operationHours": "Mall hours",
+      "position": "B1 parking",
+      "plugTypes": [{ "plugType": "Type 2", "powerRating": "AC", "chargingSpeed": "22", "price": "0.59", "priceType": "kWh" }],
+      "chargingPoints": [{ "id": "VOLT-ARC", "evIds": [{ "evCpId": "VOLT-ARC-001", "status": 1 }] }]
+    }
+  ]
+}
+
