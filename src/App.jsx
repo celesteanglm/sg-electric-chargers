@@ -72,6 +72,7 @@ export default function App() {
   useEffect(() => {
     let mounted = true;
     let inFlight = false;
+    let refreshTimer = null;
 
     async function loadChargers() {
       if (inFlight) return;
@@ -119,12 +120,19 @@ export default function App() {
       }
     }
 
+    function scheduleNextRefresh() {
+      refreshTimer = window.setTimeout(async () => {
+        await loadChargers();
+        if (mounted) scheduleNextRefresh();
+      }, getMsUntilNextRefreshBoundary());
+    }
+
     loadChargers();
-    const refreshTimer = window.setInterval(loadChargers, CLIENT_REFRESH_MS);
+    scheduleNextRefresh();
 
     return () => {
       mounted = false;
-      window.clearInterval(refreshTimer);
+      if (refreshTimer) window.clearTimeout(refreshTimer);
     };
   }, []);
 
@@ -759,11 +767,16 @@ function formatFeedTime(value) {
     hour12: true,
   }).formatToParts(date);
   const hour = parts.find((part) => part.type === "hour")?.value || "0";
-  const minute = Number(parts.find((part) => part.type === "minute")?.value || 0);
+  const minute = parts.find((part) => part.type === "minute")?.value || "00";
   const dayPeriod = (parts.find((part) => part.type === "dayPeriod")?.value || "").toLowerCase().replaceAll(".", "");
-  const roundedMinute = Math.floor(minute / 5) * 5;
 
-  return `Updated ${hour}.${String(roundedMinute).padStart(2, "0")}${dayPeriod} SGT`;
+  return `Updated ${hour}.${minute}${dayPeriod} SGT`;
+}
+
+function getMsUntilNextRefreshBoundary(nowMs = Date.now(), intervalMs = CLIENT_REFRESH_MS) {
+  const remainder = nowMs % intervalMs;
+
+  return remainder === 0 ? intervalMs : intervalMs - remainder;
 }
 
 function getStationPayload(payload) {
