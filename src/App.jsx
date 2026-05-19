@@ -219,22 +219,49 @@ function ChargerMapPage({ onNavigate }) {
 
   useEffect(() => () => stopLocationWatch(), []);
 
-  // Dynamically set touch-action on the sheet content so the browser never
-  // starts a downward scroll gesture when we're already at the top.
-  // pan-up = browser handles upward swipe (reveal content below); downward
-  // swipe is left to us for the drag-to-close gesture.
+  // On iOS Safari, dynamically setting touch-action is ignored — the browser
+  // reads it at gesture start, before our JS can update it. The only reliable
+  // way to prevent the browser from scrolling the content when we want to
+  // drag the sheet closed is a non-passive touchmove listener that calls
+  // preventDefault() for downward gestures when already at scroll top.
   useEffect(() => {
     const content = sheetContentRef.current;
     if (!content) return;
 
-    function syncTouchAction() {
-      content.style.touchAction = content.scrollTop <= 1 ? "pan-up pinch-zoom" : "";
+    let touchStartY = null;
+    let touchStartScrollTop = null;
+
+    function onTouchStart(e) {
+      touchStartY = e.touches[0].clientY;
+      touchStartScrollTop = content.scrollTop;
     }
 
-    content.addEventListener("scroll", syncTouchAction, { passive: true });
-    syncTouchAction();
+    function onTouchMove(e) {
+      if (touchStartScrollTop === null || touchStartScrollTop > 1) return;
+      const delta = e.touches[0].clientY - touchStartY;
+      if (delta > 0) {
+        // Downward drag at scroll top: block browser scroll so pointer
+        // events can drive the sheet-drag gesture instead.
+        e.preventDefault();
+      }
+    }
 
-    return () => content.removeEventListener("scroll", syncTouchAction);
+    function onTouchEnd() {
+      touchStartY = null;
+      touchStartScrollTop = null;
+    }
+
+    content.addEventListener("touchstart", onTouchStart, { passive: true });
+    content.addEventListener("touchmove", onTouchMove, { passive: false });
+    content.addEventListener("touchend", onTouchEnd, { passive: true });
+    content.addEventListener("touchcancel", onTouchEnd, { passive: true });
+
+    return () => {
+      content.removeEventListener("touchstart", onTouchStart);
+      content.removeEventListener("touchmove", onTouchMove);
+      content.removeEventListener("touchend", onTouchEnd);
+      content.removeEventListener("touchcancel", onTouchEnd);
+    };
   }, []);
 
   const searchQuery = useMemo(() => buildSearchQuery(query), [query]);
