@@ -1704,6 +1704,24 @@ button {
     display: none;
   }
 
+  /* Show hidden content while the sheet is being dragged open */
+  .bottom-sheet.is-dragging.sheet-collapsed .feed-warning {
+    display: block;
+  }
+
+  .bottom-sheet.is-dragging.sheet-collapsed .detail-card {
+    display: grid;
+  }
+
+  .bottom-sheet.is-dragging.sheet-collapsed .nearby-header,
+  .bottom-sheet.is-dragging.sheet-collapsed .station-list-footer {
+    display: flex;
+  }
+
+  .bottom-sheet.is-dragging.sheet-collapsed .station-list {
+    display: grid;
+  }
+
   .summary-strip {
     grid-template-columns: 1.28fr 0.82fr 1.2fr;
     flex: 0 0 auto;

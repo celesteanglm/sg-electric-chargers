@@ -544,6 +544,7 @@ function ChargerMapPage({ onNavigate }) {
 
     if (sheetRef.current) {
       sheetRef.current.style.transition = "none";
+      sheetRef.current.classList.add("is-dragging");
     }
 
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -586,6 +587,7 @@ function ChargerMapPage({ onNavigate }) {
     if (sheetRef.current) {
       sheetRef.current.style.transition = "";
       sheetRef.current.style.height = "";
+      sheetRef.current.classList.remove("is-dragging");
     }
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -602,6 +604,7 @@ function ChargerMapPage({ onNavigate }) {
 
     if (sheetRef.current) {
       sheetRef.current.style.transition = "none";
+      sheetRef.current.classList.add("is-dragging");
     }
 
     window.addEventListener("mousemove", handleMouseMoveDrag);
@@ -640,6 +643,7 @@ function ChargerMapPage({ onNavigate }) {
     if (sheetRef.current) {
       sheetRef.current.style.transition = "";
       sheetRef.current.style.height = "";
+      sheetRef.current.classList.remove("is-dragging");
     }
 
     if (sheetDidDrag.current) {
