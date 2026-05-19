@@ -1037,7 +1037,6 @@ function StationDetail({ station }) {
     }))
     .filter(({ target }) => target.available);
   const primaryAppTarget = appTargets.length === 0 ? getProviderAppTarget(providers[0]) : null;
-  const perProviderStats = getPerProviderStats(station.chargers || []);
   const plugTypeStats = getPlugTypeStats(station.chargers || []);
   const bestPlug = station.plugTypes[0];
 
@@ -1108,34 +1107,7 @@ function StationDetail({ station }) {
           Open in Google Maps
         </a>
 
-        {providers.length > 1 ? (
-          <div className="provider-rows">
-            {providers.map((providerName) => {
-              const profile = getProviderProfile(providerName);
-              const stats = perProviderStats.get(profile.key);
-              const appTarget = getProviderAppTarget(providerName);
-              return (
-                <div key={providerName} className="provider-row">
-                  <ProviderBadge providerName={providerName} compact />
-                  {stats ? (
-                    <span className="provider-plug-count">{stats.available}/{stats.total} open</span>
-                  ) : null}
-                  {appTarget.available ? (
-                    <button
-                      className="provider-app-btn"
-                      type="button"
-                      onClick={() => openProviderApp(providerName)}
-                      aria-label={`Open ${profile.appName}`}
-                    >
-                      <ExternalLink size={13} />
-                      {profile.appName}
-                    </button>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        ) : appTargets.length > 0 ? (
+        {appTargets.length > 0 ? (
           appTargets.map(({ providerName, profile }) => (
             <button
               key={providerName}
