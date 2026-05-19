@@ -17,6 +17,7 @@ import {
   Navigation,
   PlugZap,
   Search,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { normalizeChargerStations } from "./lib/chargers.js";
@@ -108,6 +109,8 @@ function ChargerMapPage({ onNavigate }) {
   const [locationNotice, setLocationNotice] = useState("");
   const [sheetMode, setSheetMode] = useState(getInitialSheetMode);
   const [sheetHasUserInteracted, setSheetHasUserInteracted] = useState(false);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const filterBarRef = useRef(null);
   const mapRef = useRef(null);
   const sheetDragStartY = useRef(null);
   const sheetDidDrag = useRef(false);
@@ -121,6 +124,7 @@ function ChargerMapPage({ onNavigate }) {
   const activeAreaIds = useMemo(() => new Set(selectedFilters.areas), [selectedFilters.areas]);
   const activeOperatorIds = useMemo(() => new Set(selectedFilters.operators), [selectedFilters.operators]);
   const activeConnectorTypeIds = useMemo(() => new Set(selectedFilters.connectorTypes), [selectedFilters.connectorTypes]);
+  const extendedFilterCount = selectedFilters.areas.length + selectedFilters.operators.length + selectedFilters.connectorTypes.length;
   const allFiltersActive = !hasActiveFilters(selectedFilters);
   const utilityFilterCounts = useMemo(
     () => ({
@@ -358,6 +362,27 @@ function ChargerMapPage({ onNavigate }) {
       };
     });
   }, [areaFilters, connectorTypeFilters, operatorFilters, stations.length]);
+
+  useEffect(() => {
+    if (!filterPanelOpen) return;
+
+    function handleClickOutside(event) {
+      if (filterBarRef.current && !filterBarRef.current.contains(event.target)) {
+        setFilterPanelOpen(false);
+      }
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setFilterPanelOpen(false);
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [filterPanelOpen]);
 
   useEffect(() => {
     if (applyingLocationAreaFilter.current) {
@@ -727,63 +752,93 @@ function ChargerMapPage({ onNavigate }) {
             ) : null}
           </label>
 
-          <div className="filter-scroller" aria-label="Charger filters by availability, speed, area, operator, and connector type">
-            <span className="filter-rail-label">
-              <Filter size={14} aria-hidden="true" />
-              Filters
-            </span>
-            <UtilityFilterChip
-              active={allFiltersActive}
-              ariaLabel="Show all chargers and clear selected filters."
-              count={utilityFilterCounts.all}
-              item={ALL_FILTER}
-              onSelect={clearFilters}
-            />
-            {QUICK_FILTERS.map((item) => (
+          <div ref={filterBarRef}>
+          <div className="filter-bar" aria-label="Charger filters">
+            <div className="filter-quick-chips">
               <UtilityFilterChip
-                active={selectedFilters[item.stateKey]}
-                ariaLabel={`${selectedFilters[item.stateKey] ? "Remove" : "Add"} ${item.label} filter.`}
-                count={utilityFilterCounts[item.id]}
-                item={item}
-                key={item.id}
-                onSelect={() => toggleQuickFilter(item.stateKey)}
+                active={allFiltersActive}
+                ariaLabel="Show all chargers and clear selected filters."
+                count={utilityFilterCounts.all}
+                item={ALL_FILTER}
+                onSelect={clearFilters}
               />
-            ))}
-            <span className="filter-divider" aria-hidden="true" />
-            {areaFilters.map((item) => (
-              <UtilityFilterChip
-                active={activeAreaIds.has(item.areaId)}
-                ariaLabel={`${activeAreaIds.has(item.areaId) ? "Remove" : "Add"} ${item.label} area filter. ${item.availableCount} open plugs across ${item.stationCount} stations.`}
-                count={item.availableCount}
-                item={item}
-                key={item.id}
-                onSelect={() => toggleAreaFilter(item.areaId)}
-              />
-            ))}
-            <span className="filter-divider" aria-hidden="true" />
-            {operatorFilters.map((item) => (
-              <OperatorFilterChip
-                active={activeOperatorIds.has(item.id)}
-                item={item}
-                key={item.id}
-                onSelect={() => toggleOperatorFilter(item.id)}
-              />
-            ))}
-            {connectorTypeFilters.length > 0 ? (
-              <>
-                <span className="filter-divider" aria-hidden="true" />
-                {connectorTypeFilters.map((item) => (
-                  <UtilityFilterChip
-                    active={activeConnectorTypeIds.has(item.id)}
-                    ariaLabel={`${activeConnectorTypeIds.has(item.id) ? "Remove" : "Add"} ${item.label} connector filter. ${item.stationCount} stations.`}
-                    count={item.stationCount}
-                    item={item}
-                    key={item.id}
-                    onSelect={() => toggleConnectorTypeFilter(item.id)}
-                  />
-                ))}
-              </>
-            ) : null}
+              {QUICK_FILTERS.map((item) => (
+                <UtilityFilterChip
+                  active={selectedFilters[item.stateKey]}
+                  ariaLabel={`${selectedFilters[item.stateKey] ? "Remove" : "Add"} ${item.label} filter.`}
+                  count={utilityFilterCounts[item.id]}
+                  item={item}
+                  key={item.id}
+                  onSelect={() => toggleQuickFilter(item.stateKey)}
+                />
+              ))}
+            </div>
+            <button
+              className={extendedFilterCount > 0 ? "filter-panel-toggle has-filters" : "filter-panel-toggle"}
+              type="button"
+              onClick={() => setFilterPanelOpen((v) => !v)}
+              aria-expanded={filterPanelOpen}
+              aria-label="Open area, operator, and connector filters"
+            >
+              <SlidersHorizontal size={13} aria-hidden="true" />
+              More
+              {extendedFilterCount > 0 ? <span className="filter-badge">{extendedFilterCount}</span> : null}
+            </button>
+          </div>
+
+          {filterPanelOpen ? (
+            <div className="filter-panel" aria-label="Extended filters">
+              {areaFilters.length > 0 ? (
+                <div className="filter-section">
+                  <span className="filter-section-label">Area</span>
+                  <div className="filter-section-chips">
+                    {areaFilters.map((item) => (
+                      <UtilityFilterChip
+                        active={activeAreaIds.has(item.areaId)}
+                        ariaLabel={`${activeAreaIds.has(item.areaId) ? "Remove" : "Add"} ${item.label} area filter. ${item.availableCount} open plugs across ${item.stationCount} stations.`}
+                        count={item.availableCount}
+                        item={item}
+                        key={item.id}
+                        onSelect={() => toggleAreaFilter(item.areaId)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {operatorFilters.length > 0 ? (
+                <div className="filter-section">
+                  <span className="filter-section-label">Operator</span>
+                  <div className="filter-section-chips">
+                    {operatorFilters.map((item) => (
+                      <OperatorFilterChip
+                        active={activeOperatorIds.has(item.id)}
+                        item={item}
+                        key={item.id}
+                        onSelect={() => toggleOperatorFilter(item.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {connectorTypeFilters.length > 0 ? (
+                <div className="filter-section">
+                  <span className="filter-section-label">Connector</span>
+                  <div className="filter-section-chips">
+                    {connectorTypeFilters.map((item) => (
+                      <UtilityFilterChip
+                        active={activeConnectorTypeIds.has(item.id)}
+                        ariaLabel={`${activeConnectorTypeIds.has(item.id) ? "Remove" : "Add"} ${item.label} connector filter. ${item.stationCount} stations.`}
+                        count={item.stationCount}
+                        item={item}
+                        key={item.id}
+                        onSelect={() => toggleConnectorTypeFilter(item.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           </div>
 
           {topNotice ? <div className="location-notice">{topNotice}</div> : null}
