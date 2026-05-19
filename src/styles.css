@@ -1053,20 +1053,40 @@ button {
   min-width: 0;
 }
 
-.connector-strip {
+.plug-rows {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.connector-strip span {
-  padding: 7px 9px;
-  color: #17352f;
+.plug-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
   background: #f4fbf8;
   border: 1px solid #d6e9e1;
   border-radius: 8px;
+}
+
+.plug-type-label {
+  color: #17352f;
   font-size: 12px;
   font-weight: 800;
+}
+
+.plug-speed {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.plug-price {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .detail-actions {

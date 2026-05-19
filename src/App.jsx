@@ -1114,12 +1114,26 @@ function StationDetail({ station }) {
         )}
       </div>
 
-      <div className="connector-strip">
-        {station.plugTypes.slice(0, 4).map((plug, index) => (
-          <span key={`${plug.plugType}-${plug.powerRating}-${index}`}>
-            {plug.plugType || "Plug"} {plug.chargingSpeed ? `${plug.chargingSpeed} kW` : plug.powerRating || ""}
-          </span>
-        ))}
+      <div className="plug-rows">
+        {station.plugTypes.length > 0 ? station.plugTypes.map((plug, index) => (
+          <div key={`${plug.plugType}-${plug.chargingSpeed}-${index}`} className="plug-row">
+            <span className="plug-type-label">{plug.plugType || "Plug"}</span>
+            {plug.chargingSpeed ? (
+              <span className="plug-speed">{plug.chargingSpeed} kW</span>
+            ) : plug.powerRating ? (
+              <span className="plug-speed">{plug.powerRating}</span>
+            ) : null}
+            {plug.price ? (
+              <span className="plug-price">
+                {plug.priceType ? `$${plug.price}/${plug.priceType}` : `$${plug.price}`}
+              </span>
+            ) : null}
+          </div>
+        )) : (
+          <div className="plug-row">
+            <span className="plug-type-label">Plug info unavailable</span>
+          </div>
+        )}
       </div>
     </article>
   );
