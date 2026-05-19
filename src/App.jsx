@@ -542,7 +542,7 @@ function ChargerMapPage({ onNavigate }) {
         : "";
   const topNotice = locationNotice || searchNotice;
   const filterContextNotice = isDefaultCentralAvailabilityFilter(selectedFilters)
-    ? "Showing only Central chargers that are available now. Central and Available now are selected; select more areas or clear filters to see more."
+    ? "Central + available filters are on. Add areas or clear filters to see more."
     : "";
 
   const [filterNoticeDismissed, setFilterNoticeDismissed] = useState(false);

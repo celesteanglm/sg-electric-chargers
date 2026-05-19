@@ -81,7 +81,7 @@ button {
   left: 18px;
   right: 18px;
   display: grid;
-  gap: 12px;
+  gap: 8px;
   max-width: 676px;
 }
 
@@ -152,11 +152,11 @@ button {
 }
 
 .brand-row .brand-tagline {
-  max-width: 360px;
+  max-width: 390px;
   overflow: hidden;
-  color: #8a988f;
-  font-size: 10px;
-  font-weight: 600;
+  color: #607269;
+  font-size: 11px;
+  font-weight: 700;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -314,10 +314,10 @@ button {
 
 .search-box {
   display: grid;
-  grid-template-columns: 20px 1fr 28px;
+  grid-template-columns: 18px 1fr 26px;
   align-items: center;
-  min-height: 48px;
-  padding: 0 10px 0 13px;
+  min-height: 42px;
+  padding: 0 8px 0 11px;
   border-radius: 8px;
   color: #49635b;
   outline: 2px solid transparent;
@@ -336,7 +336,7 @@ button {
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
 }
 
@@ -352,8 +352,8 @@ button {
 .search-box button {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border: 0;
   color: var(--muted);
   background: transparent;
@@ -363,9 +363,9 @@ button {
 .filter-scroller {
   display: flex;
   align-items: center;
-  gap: 9px;
-  min-height: 54px;
-  padding: 8px;
+  gap: 6px;
+  min-height: 44px;
+  padding: 5px 6px;
   overflow-x: auto;
   border-radius: 8px;
   scrollbar-width: none;
@@ -379,12 +379,12 @@ button {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 8px;
+  gap: 5px;
+  height: 32px;
+  padding: 0 7px;
   color: var(--ink);
   border-right: 1px solid rgba(8, 40, 63, 0.1);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
 }
@@ -392,7 +392,7 @@ button {
 .filter-divider {
   flex: 0 0 auto;
   width: 1px;
-  height: 30px;
+  height: 24px;
   background: rgba(8, 40, 63, 0.11);
 }
 
@@ -400,16 +400,16 @@ button {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 38px;
-  padding: 0 8px;
+  gap: 5px;
+  height: 32px;
+  padding: 0 7px;
   color: #223a34;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(247, 251, 250, 0.94)),
     #f7fbfa;
   border: 1px solid #d8e8e2;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   cursor: pointer;
   transition:
@@ -438,25 +438,25 @@ button {
 .chip-icon {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   color: var(--chip-text, #ffffff);
   background: var(--chip-color, var(--ink));
-  border-radius: 8px;
+  border-radius: 7px;
   box-shadow: inset 0 -2px 0 rgba(8, 40, 63, 0.14);
 }
 
 .chip-count {
   display: inline-flex;
   align-items: center;
-  min-width: 22px;
-  height: 22px;
+  min-width: 19px;
+  height: 18px;
   justify-content: center;
-  padding: 0 6px;
+  padding: 0 5px;
   color: #44554e;
   background: rgba(8, 40, 63, 0.06);
-  border-radius: 8px;
-  font-size: 11px;
+  border-radius: 7px;
+  font-size: 10px;
   line-height: 1;
 }
 
@@ -464,10 +464,10 @@ button {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 40px;
-  max-width: 212px;
-  padding: 4px 9px 4px 4px;
+  gap: 6px;
+  height: 34px;
+  max-width: 190px;
+  padding: 3px 8px 3px 3px;
   color: #17352f;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 251, 250, 0.96)),
@@ -502,8 +502,8 @@ button {
 .operator-chip-icon {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   overflow: hidden;
   color: var(--provider-text, #ffffff);
   background: var(--provider-color, #52605b);
@@ -515,7 +515,7 @@ button {
 }
 
 .operator-chip-icon > span {
-  max-width: 26px;
+  max-width: 22px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -523,15 +523,15 @@ button {
 
 .operator-chip-logo {
   display: block;
-  max-width: 24px;
-  max-height: 24px;
+  max-width: 21px;
+  max-height: 21px;
   object-fit: contain;
 }
 
 .operator-chip-logo-kigo,
 .operator-chip-logo-volt {
-  width: 25px;
-  height: 25px;
+  width: 22px;
+  height: 22px;
   background: #ffffff;
   border-radius: 7px;
 }
@@ -544,10 +544,10 @@ button {
 }
 
 .operator-chip-name {
-  max-width: 145px;
+  max-width: 132px;
   overflow: hidden;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   line-height: 1.05;
   text-overflow: ellipsis;
@@ -556,7 +556,7 @@ button {
 
 .operator-chip-count {
   color: #697a73;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 900;
   line-height: 1;
   text-transform: uppercase;
@@ -577,29 +577,33 @@ button {
 }
 
 .filter-context-notice {
-  color: #16493f;
-  background: rgba(240, 253, 246, 0.94);
-  border-color: rgba(24, 191, 115, 0.28);
+  padding: 8px 10px;
+  color: #5d7068;
+  background: rgba(250, 253, 251, 0.76);
+  border-color: rgba(190, 216, 206, 0.68);
+  box-shadow: 0 5px 12px rgba(8, 40, 63, 0.06);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .notice-dismiss {
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   margin-top: -1px;
-  color: #2d7a60;
+  color: #6a7d74;
   background: transparent;
   border: 0;
   border-radius: 4px;
   cursor: pointer;
-  opacity: 0.7;
+  opacity: 0.56;
 }
 
 .notice-dismiss:hover {
@@ -1199,7 +1203,7 @@ button {
   gap: 10px;
   align-items: center;
   width: 100%;
-  padding: 11px 10px;
+  padding: 9px 10px;
   text-align: left;
   background: #fbfdfc;
   border: 1px solid #dcebe5;
@@ -1233,15 +1237,15 @@ button {
 }
 
 .station-row strong {
-  margin-bottom: 4px;
+  margin-bottom: 3px;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.16;
 }
 
 .station-row > div > span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.25;
 }
 
@@ -1296,13 +1300,13 @@ button {
 .row-meta b {
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
-  padding: 0 7px;
+  min-height: 20px;
+  padding: 0 6px;
   color: #074b35;
   background: #def9eb;
   border: 1px solid rgba(24, 191, 115, 0.2);
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
 }
 
@@ -1573,25 +1577,25 @@ button {
   }
 
   .filter-scroller {
-    gap: 7px;
-    min-height: 50px;
-    padding: 7px;
+    gap: 5px;
+    min-height: 42px;
+    padding: 5px;
   }
 
   .filter-rail-label {
     justify-content: center;
-    width: 38px;
+    width: 34px;
     padding: 0;
     font-size: 0;
   }
 
   .filter-divider {
-    height: 28px;
+    height: 22px;
   }
 
   .chip {
-    height: 36px;
-    padding: 0 7px;
+    height: 32px;
+    padding: 0 6px;
   }
 
   .chip-count {
@@ -1599,17 +1603,17 @@ button {
   }
 
   .operator-chip {
-    height: 38px;
-    max-width: 184px;
+    height: 34px;
+    max-width: 176px;
   }
 
   .operator-chip-icon {
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
   }
 
   .operator-chip-name {
-    max-width: 118px;
+    max-width: 112px;
   }
 
   .bottom-sheet {
@@ -1816,6 +1820,12 @@ button {
 
   .brand-row p {
     font-size: 10px;
+  }
+
+  .brand-row .brand-tagline {
+    color: #607269;
+    font-size: 10.5px;
+    font-weight: 700;
   }
 
   .live-pill {
