@@ -109,6 +109,7 @@ function ChargerMapPage({ onNavigate }) {
   const [sheetHasUserInteracted, setSheetHasUserInteracted] = useState(false);
   const mapRef = useRef(null);
   const sheetRef = useRef(null);
+  const sheetContentRef = useRef(null);
   const sheetDragStartY = useRef(null);
   const sheetDragStartHeight = useRef(null);
   const sheetLastPointerY = useRef(null);
@@ -217,6 +218,24 @@ function ChargerMapPage({ onNavigate }) {
   }, [sheetHasUserInteracted]);
 
   useEffect(() => () => stopLocationWatch(), []);
+
+  // Dynamically set touch-action on the sheet content so the browser never
+  // starts a downward scroll gesture when we're already at the top.
+  // pan-up = browser handles upward swipe (reveal content below); downward
+  // swipe is left to us for the drag-to-close gesture.
+  useEffect(() => {
+    const content = sheetContentRef.current;
+    if (!content) return;
+
+    function syncTouchAction() {
+      content.style.touchAction = content.scrollTop <= 1 ? "pan-up pinch-zoom" : "";
+    }
+
+    content.addEventListener("scroll", syncTouchAction, { passive: true });
+    syncTouchAction();
+
+    return () => content.removeEventListener("scroll", syncTouchAction);
+  }, []);
 
   const searchQuery = useMemo(() => buildSearchQuery(query), [query]);
   const textSearchMatches = useMemo(() => rankStationSearchMatches(stations, searchQuery), [stations, searchQuery]);
@@ -683,28 +702,23 @@ function ChargerMapPage({ onNavigate }) {
   }
 
   // Allows dragging the sheet closed by pulling down from the content area when
-  // already scrolled to the very top. Uses imperative listeners so we can mark
-  // the pointermove listener as { passive: false } and call preventDefault() to
-  // prevent the browser from scrolling while we take over the gesture.
+  // already scrolled to the very top. touch-action:pan-up on the content element
+  // (set via the scroll-listener effect above) prevents the browser from ever
+  // starting a native scroll for downward pans when at the top, so our handler
+  // gets exclusive control without a race against the browser scroller.
   function handleContentPointerDown(event) {
     if (event.button != null && event.button !== 0) return;
     if (sheetMode !== "expanded") return;
 
-    const startY = event.clientY;
     const content = event.currentTarget;
-    const scrollTopAtStart = content.scrollTop;
+    if (content.scrollTop > 1) return; // not at top; browser handles scroll normally
+
+    const startY = event.clientY;
     let dragActive = false;
 
     function onContentMove(moveEvent) {
-      if (dragActive) {
-        moveEvent.preventDefault();
-        handleSheetPointerMove(moveEvent);
-        return;
-      }
-      if (scrollTopAtStart > 0) return;
       const delta = moveEvent.clientY - startY;
-      if (delta > 8) {
-        moveEvent.preventDefault();
+      if (!dragActive && delta > 4) {
         dragActive = true;
         sheetDragStartY.current = startY;
         sheetDragStartHeight.current = sheetRef.current?.offsetHeight ?? 0;
@@ -714,6 +728,9 @@ function ChargerMapPage({ onNavigate }) {
           sheetRef.current.style.transition = "none";
           sheetRef.current.classList.add("is-dragging");
         }
+      }
+      if (dragActive) {
+        moveEvent.preventDefault();
         handleSheetPointerMove(moveEvent);
       }
     }
@@ -966,7 +983,7 @@ function ChargerMapPage({ onNavigate }) {
           {sheetMode === "collapsed" ? <ChevronsUp className="sheet-swipe-cue" size={18} aria-hidden="true" /> : null}
         </button>
 
-        <div className="sheet-content" onPointerDown={handleContentPointerDown}>
+        <div ref={sheetContentRef} className="sheet-content" onPointerDown={handleContentPointerDown}>
           <div className="panel-kicker">
             <span>
               <PlugZap size={15} aria-hidden="true" />
