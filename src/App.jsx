@@ -535,6 +535,7 @@ function ChargerMapPage({ onNavigate }) {
 
   function handleSheetPointerDown(event) {
     if (event.button != null && event.button !== 0) return;
+    if (sheetDragStartY.current != null) return; // already started (e.g. bubbled from child)
 
     sheetDragStartY.current = event.clientY;
     sheetDragStartHeight.current = sheetRef.current?.offsetHeight ?? 0;
@@ -679,6 +680,57 @@ function ChargerMapPage({ onNavigate }) {
 
     setSheetHasUserInteracted(true);
     setSheetMode((current) => (current === "expanded" ? "collapsed" : "expanded"));
+  }
+
+  // Allows dragging the sheet closed by pulling down from the content area when
+  // already scrolled to the very top. Uses imperative listeners so we can mark
+  // the pointermove listener as { passive: false } and call preventDefault() to
+  // prevent the browser from scrolling while we take over the gesture.
+  function handleContentPointerDown(event) {
+    if (event.button != null && event.button !== 0) return;
+    if (sheetMode !== "expanded") return;
+
+    const startY = event.clientY;
+    const content = event.currentTarget;
+    const scrollTopAtStart = content.scrollTop;
+    let dragActive = false;
+
+    function onContentMove(moveEvent) {
+      if (dragActive) {
+        moveEvent.preventDefault();
+        handleSheetPointerMove(moveEvent);
+        return;
+      }
+      if (scrollTopAtStart > 0) return;
+      const delta = moveEvent.clientY - startY;
+      if (delta > 8) {
+        moveEvent.preventDefault();
+        dragActive = true;
+        sheetDragStartY.current = startY;
+        sheetDragStartHeight.current = sheetRef.current?.offsetHeight ?? 0;
+        sheetLastPointerY.current = startY;
+        sheetLastPointerTime.current = Date.now();
+        if (sheetRef.current) {
+          sheetRef.current.style.transition = "none";
+          sheetRef.current.classList.add("is-dragging");
+        }
+        handleSheetPointerMove(moveEvent);
+      }
+    }
+
+    function onContentUp(upEvent) {
+      content.removeEventListener("pointermove", onContentMove);
+      content.removeEventListener("pointerup", onContentUp);
+      content.removeEventListener("pointercancel", onContentUp);
+      if (dragActive) {
+        dragActive = false;
+        finishSheetDrag(upEvent.clientY);
+      }
+    }
+
+    content.addEventListener("pointermove", onContentMove, { passive: false });
+    content.addEventListener("pointerup", onContentUp, { once: true });
+    content.addEventListener("pointercancel", onContentUp, { once: true });
   }
 
   const openConnectorCount = filteredStations.reduce((sum, station) => sum + station.availableCount, 0);
@@ -889,7 +941,15 @@ function ChargerMapPage({ onNavigate }) {
         </MapContainer>
       </section>
 
-      <section ref={sheetRef} className={`bottom-sheet sheet-${sheetMode}`} aria-label="Charger details and results">
+      <section
+        ref={sheetRef}
+        className={`bottom-sheet sheet-${sheetMode}`}
+        aria-label="Charger details and results"
+        onPointerDown={sheetMode === "collapsed" ? handleSheetPointerDown : undefined}
+        onPointerMove={sheetMode === "collapsed" ? handleSheetPointerMove : undefined}
+        onPointerUp={sheetMode === "collapsed" ? handleSheetPointerUp : undefined}
+        onPointerCancel={sheetMode === "collapsed" ? handleSheetPointerCancel : undefined}
+      >
         <button
           className="sheet-handle"
           type="button"
@@ -906,7 +966,7 @@ function ChargerMapPage({ onNavigate }) {
           {sheetMode === "collapsed" ? <ChevronsUp className="sheet-swipe-cue" size={18} aria-hidden="true" /> : null}
         </button>
 
-        <div className="sheet-content">
+        <div className="sheet-content" onPointerDown={handleContentPointerDown}>
           <div className="panel-kicker">
             <span>
               <PlugZap size={15} aria-hidden="true" />
