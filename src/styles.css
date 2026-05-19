@@ -1678,6 +1678,13 @@ button {
     padding: 0 8px;
   }
 
+  .filter-panel {
+    max-height: calc(100dvh - 310px - max(12px, env(safe-area-inset-bottom)));
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(8, 40, 63, 0.18) transparent;
+  }
+
   .filter-divider {
     height: 22px;
   }
