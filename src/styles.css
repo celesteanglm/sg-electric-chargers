@@ -758,6 +758,28 @@ button {
   box-shadow: 0 4px 14px rgba(242, 165, 26, 0.34);
 }
 
+/* Cluster marker styles */
+.cluster-marker {
+  background: transparent;
+  border: none;
+}
+
+.cluster-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: var(--ink);
+  color: #ffffff;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+  border: 3px solid #ffffff;
+  box-shadow: 0 3px 12px rgba(8, 40, 63, 0.35);
+  cursor: pointer;
+}
+
 .leaflet-popup-content-wrapper {
   border-radius: 8px;
   border: 1px solid rgba(8, 40, 63, 0.08);
