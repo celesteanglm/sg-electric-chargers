@@ -1117,6 +1117,7 @@ function StationDetail({ station }) {
       <div className="plug-rows">
         {station.plugTypes.length > 0 ? station.plugTypes.map((plug, index) => (
           <div key={`${plug.plugType}-${plug.chargingSpeed}-${index}`} className="plug-row">
+            {plug.provider ? <ProviderBadge providerName={plug.provider} compact /> : null}
             <span className="plug-type-label">{plug.plugType || "Plug"}</span>
             {plug.chargingSpeed ? (
               <span className="plug-speed">{plug.chargingSpeed} kW</span>
