@@ -988,6 +988,29 @@ function MapBridge({ mapRef, onCenterChange }) {
   return null;
 }
 
+function getPlugTypeStats(chargers) {
+  const stats = new Map();
+  for (const charger of chargers) {
+    const plugTypes = charger.plugTypes || [];
+    const connectors = charger.connectors || [];
+    for (const plug of plugTypes) {
+      const key = `${plug.providerKey}|${plug.plugType}|${plug.chargingSpeed}|${plug.powerRating}`;
+      if (!stats.has(key)) stats.set(key, { available: 0, total: 0 });
+      const entry = stats.get(key);
+      if (plugTypes.length === 1 && connectors.length > 0) {
+        // Single plug type on this charger — connectors map directly to it
+        entry.available += connectors.filter((c) => c.status === "available").length;
+        entry.total += connectors.length;
+      } else {
+        // Multi-plug-type charger or no connector data — count the charger as 1 unit
+        entry.total += 1;
+        if (charger.status === "available") entry.available += 1;
+      }
+    }
+  }
+  return stats;
+}
+
 function getPerProviderStats(chargers) {
   const stats = new Map();
   for (const charger of chargers) {
@@ -1017,7 +1040,31 @@ function StationDetail({ station }) {
     .filter(({ target }) => target.available);
   const primaryAppTarget = appTargets.length === 0 ? getProviderAppTarget(providers[0]) : null;
   const perProviderStats = getPerProviderStats(station.chargers || []);
+  const plugTypeStats = getPlugTypeStats(station.chargers || []);
   const bestPlug = station.plugTypes[0];
+
+  const plugRows = station.plugTypes.map((plug, index) => {
+    const stats = plugTypeStats.get(`${plug.providerKey}|${plug.plugType}|${plug.chargingSpeed}|${plug.powerRating}`);
+    return (
+      <div key={`${plug.plugType}-${plug.chargingSpeed}-${index}`} className="plug-row">
+        {plug.provider ? <ProviderBadge providerName={plug.provider} compact /> : null}
+        <span className="plug-type-label">{plug.plugType || "Plug"}</span>
+        {plug.chargingSpeed ? (
+          <span className="plug-speed">{plug.chargingSpeed} kW</span>
+        ) : plug.powerRating ? (
+          <span className="plug-speed">{plug.powerRating}</span>
+        ) : null}
+        {stats ? (
+          <span className="plug-status-count">{stats.available}/{stats.total}</span>
+        ) : null}
+        {plug.price ? (
+          <span className="plug-price">
+            {plug.priceType ? `$${plug.price}/${plug.priceType}` : `$${plug.price}`}
+          </span>
+        ) : null}
+      </div>
+    );
+  });
 
   return (
     <article className="detail-card">
@@ -1115,22 +1162,7 @@ function StationDetail({ station }) {
       </div>
 
       <div className="plug-rows">
-        {station.plugTypes.length > 0 ? station.plugTypes.map((plug, index) => (
-          <div key={`${plug.plugType}-${plug.chargingSpeed}-${index}`} className="plug-row">
-            {plug.provider ? <ProviderBadge providerName={plug.provider} compact /> : null}
-            <span className="plug-type-label">{plug.plugType || "Plug"}</span>
-            {plug.chargingSpeed ? (
-              <span className="plug-speed">{plug.chargingSpeed} kW</span>
-            ) : plug.powerRating ? (
-              <span className="plug-speed">{plug.powerRating}</span>
-            ) : null}
-            {plug.price ? (
-              <span className="plug-price">
-                {plug.priceType ? `$${plug.price}/${plug.priceType}` : `$${plug.price}`}
-              </span>
-            ) : null}
-          </div>
-        )) : (
+        {plugRows.length > 0 ? plugRows : (
           <div className="plug-row">
             <span className="plug-type-label">Plug info unavailable</span>
           </div>

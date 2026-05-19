@@ -1081,8 +1081,15 @@ button {
   font-weight: 700;
 }
 
-.plug-price {
+.plug-status-count {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
   margin-left: auto;
+}
+
+.plug-price {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
