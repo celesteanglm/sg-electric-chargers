@@ -1134,16 +1134,16 @@ button {
   line-height: 1.35;
 }
 
-.provider-plug-breakdown {
+.provider-rows {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.provider-plug-row {
+.provider-row {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   padding: 6px 10px 6px 6px;
   background: var(--surface-strong);
   border: 1px solid var(--border);
@@ -1155,6 +1155,26 @@ button {
   font-size: 13px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.provider-app-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.provider-app-btn:hover {
+  background: var(--surface-hover, var(--surface-strong));
 }
 
 .nearby-header {
