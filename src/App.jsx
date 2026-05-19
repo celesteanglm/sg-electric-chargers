@@ -997,12 +997,10 @@ function getPlugTypeStats(chargers) {
       const key = `${plug.providerKey}|${plug.plugType}|${plug.chargingSpeed}|${plug.powerRating}`;
       if (!stats.has(key)) stats.set(key, { available: 0, total: 0 });
       const entry = stats.get(key);
-      if (plugTypes.length === 1 && connectors.length > 0) {
-        // Single plug type on this charger — connectors map directly to it
+      if (connectors.length > 0) {
         entry.available += connectors.filter((c) => c.status === "available").length;
         entry.total += connectors.length;
       } else {
-        // Multi-plug-type charger or no connector data — count the charger as 1 unit
         entry.total += 1;
         if (charger.status === "available") entry.available += 1;
       }
