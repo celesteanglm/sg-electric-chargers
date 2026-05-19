@@ -4,6 +4,7 @@ import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import {
   ArrowLeft,
   BatteryCharging,
+  Cable,
   ChevronsUp,
   CircleDot,
   Clock,
@@ -116,8 +117,10 @@ function ChargerMapPage({ onNavigate }) {
   const applyingLocationAreaFilter = useRef(false);
   const areaFilters = useMemo(() => buildAreaFilterOptions(stations), [stations]);
   const operatorFilters = useMemo(() => buildOperatorFilterOptions(stations), [stations]);
+  const connectorTypeFilters = useMemo(() => buildConnectorTypeFilterOptions(stations), [stations]);
   const activeAreaIds = useMemo(() => new Set(selectedFilters.areas), [selectedFilters.areas]);
   const activeOperatorIds = useMemo(() => new Set(selectedFilters.operators), [selectedFilters.operators]);
+  const activeConnectorTypeIds = useMemo(() => new Set(selectedFilters.connectorTypes), [selectedFilters.connectorTypes]);
   const allFiltersActive = !hasActiveFilters(selectedFilters);
   const utilityFilterCounts = useMemo(
     () => ({
@@ -233,9 +236,9 @@ function ChargerMapPage({ onNavigate }) {
   const filteredStations = useMemo(
     () =>
       searchCandidates.filter((station) =>
-        stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds),
+        stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds),
       ),
-    [activeAreaIds, activeOperatorIds, searchCandidates, selectedFilters],
+    [activeAreaIds, activeConnectorTypeIds, activeOperatorIds, searchCandidates, selectedFilters],
   );
 
   useEffect(() => {
@@ -336,18 +339,25 @@ function ChargerMapPage({ onNavigate }) {
     updateSelectedFilters((current) => {
       const availableAreaIds = new Set(areaFilters.map((item) => item.areaId));
       const availableOperatorIds = new Set(operatorFilters.map((item) => item.id));
+      const availableConnectorTypeIds = new Set(connectorTypeFilters.map((item) => item.id));
       const nextAreas = current.areas.filter((areaId) => availableAreaIds.has(areaId));
       const nextOperators = current.operators.filter((operatorId) => availableOperatorIds.has(operatorId));
+      const nextConnectorTypes = current.connectorTypes.filter((id) => availableConnectorTypeIds.has(id));
 
-      if (nextAreas.length === current.areas.length && nextOperators.length === current.operators.length) return current;
+      if (
+        nextAreas.length === current.areas.length &&
+        nextOperators.length === current.operators.length &&
+        nextConnectorTypes.length === current.connectorTypes.length
+      ) return current;
 
       return {
         ...current,
         areas: nextAreas,
         operators: nextOperators,
+        connectorTypes: nextConnectorTypes,
       };
     });
-  }, [areaFilters, operatorFilters, stations.length]);
+  }, [areaFilters, connectorTypeFilters, operatorFilters, stations.length]);
 
   useEffect(() => {
     if (applyingLocationAreaFilter.current) {
@@ -461,8 +471,9 @@ function ChargerMapPage({ onNavigate }) {
     const areaFilterChanged = nextFilters !== selectedFiltersRef.current;
     const nextActiveAreaIds = new Set(nextFilters.areas);
     const nextActiveOperatorIds = new Set(nextFilters.operators);
+    const nextActiveConnectorTypeIds = new Set(nextFilters.connectorTypes);
     const currentFilteredStations = searchCandidatesRef.current.filter((station) =>
-      stationPassesFilters(station, nextFilters, nextActiveAreaIds, nextActiveOperatorIds),
+      stationPassesFilters(station, nextFilters, nextActiveAreaIds, nextActiveOperatorIds, nextActiveConnectorTypeIds),
     );
 
     setUserLocation((current) => (current && isSameMapCenter(current, nextLocation) ? current : nextLocation));
@@ -605,7 +616,7 @@ function ChargerMapPage({ onNavigate }) {
   const totalConnectors = filteredStations.reduce((sum, station) => sum + station.totalCount, 0);
   const feedUpdatedLabel = formatFeedTime(feed.updatedAt);
   const feedbackHref = getFeedbackMailto({
-    filterLabel: getActiveFilterLabel(selectedFilters, areaFilters, operatorFilters),
+    filterLabel: getActiveFilterLabel(selectedFilters, areaFilters, operatorFilters, connectorTypeFilters),
     query,
     visibleCount: filteredStations.length,
   });
@@ -645,6 +656,13 @@ function ChargerMapPage({ onNavigate }) {
     updateSelectedFilters((current) => ({
       ...current,
       operators: toggleValue(current.operators, operatorId),
+    }));
+  }
+
+  function toggleConnectorTypeFilter(connectorTypeId) {
+    updateSelectedFilters((current) => ({
+      ...current,
+      connectorTypes: toggleValue(current.connectorTypes, connectorTypeId),
     }));
   }
 
@@ -709,7 +727,7 @@ function ChargerMapPage({ onNavigate }) {
             ) : null}
           </label>
 
-          <div className="filter-scroller" aria-label="Charger filters by availability, speed, area, and operator">
+          <div className="filter-scroller" aria-label="Charger filters by availability, speed, area, operator, and connector type">
             <span className="filter-rail-label">
               <Filter size={14} aria-hidden="true" />
               Filters
@@ -751,6 +769,21 @@ function ChargerMapPage({ onNavigate }) {
                 onSelect={() => toggleOperatorFilter(item.id)}
               />
             ))}
+            {connectorTypeFilters.length > 0 ? (
+              <>
+                <span className="filter-divider" aria-hidden="true" />
+                {connectorTypeFilters.map((item) => (
+                  <UtilityFilterChip
+                    active={activeConnectorTypeIds.has(item.id)}
+                    ariaLabel={`${activeConnectorTypeIds.has(item.id) ? "Remove" : "Add"} ${item.label} connector filter. ${item.stationCount} stations.`}
+                    count={item.stationCount}
+                    item={item}
+                    key={item.id}
+                    onSelect={() => toggleConnectorTypeFilter(item.id)}
+                  />
+                ))}
+              </>
+            ) : null}
           </div>
 
           {topNotice ? <div className="location-notice">{topNotice}</div> : null}
@@ -1355,7 +1388,7 @@ function getFeedbackMailto({ filterLabel, query, visibleCount }) {
   return `mailto:${FEEDBACK_EMAIL}?subject=${subject}&body=${body}`;
 }
 
-function getActiveFilterLabel(filters, areaFilters, operatorFilters) {
+function getActiveFilterLabel(filters, areaFilters, operatorFilters, connectorTypeFilters) {
   const labels = [];
 
   if (filters.availableOnly) labels.push("Available now");
@@ -1371,6 +1404,11 @@ function getActiveFilterLabel(filters, areaFilters, operatorFilters) {
     if (operatorFilter) labels.push(operatorFilter.label);
   });
 
+  filters.connectorTypes.forEach((connectorTypeId) => {
+    const connectorTypeFilter = connectorTypeFilters.find((item) => item.id === connectorTypeId);
+    if (connectorTypeFilter) labels.push(connectorTypeFilter.label);
+  });
+
   return labels.length > 0 ? labels.join(" + ") : "All";
 }
 
@@ -1380,6 +1418,7 @@ function createDefaultFilterState() {
     fastOnly: false,
     areas: ["central"],
     operators: [],
+    connectorTypes: [],
   };
 }
 
@@ -1389,6 +1428,7 @@ function createAllFilterState() {
     fastOnly: false,
     areas: [],
     operators: [],
+    connectorTypes: [],
   };
 }
 
@@ -1402,7 +1442,13 @@ function applyAreaFilter(filters, areaId) {
 }
 
 function hasActiveFilters(filters) {
-  return Boolean(filters.availableOnly || filters.fastOnly || filters.areas.length > 0 || filters.operators.length > 0);
+  return Boolean(
+    filters.availableOnly ||
+      filters.fastOnly ||
+      filters.areas.length > 0 ||
+      filters.operators.length > 0 ||
+      filters.connectorTypes.length > 0,
+  );
 }
 
 function isDefaultCentralAvailabilityFilter(filters) {
@@ -1411,17 +1457,20 @@ function isDefaultCentralAvailabilityFilter(filters) {
     !filters.fastOnly &&
     filters.areas.length === 1 &&
     filters.areas[0] === "central" &&
-    filters.operators.length === 0
+    filters.operators.length === 0 &&
+    filters.connectorTypes.length === 0
   );
 }
 
-function stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds) {
+function stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds) {
   const matchesAvailability = !selectedFilters.availableOnly || station.availableCount > 0;
   const matchesSpeed = !selectedFilters.fastOnly || station.maxPowerKw >= 43;
   const matchesArea = activeAreaIds.size === 0 || activeAreaIds.has(getStationArea(station).id);
   const matchesOperator = activeOperatorIds.size === 0 || hasProviderFilterId(station, activeOperatorIds);
+  const matchesConnectorType =
+    !activeConnectorTypeIds || activeConnectorTypeIds.size === 0 || hasConnectorTypeFilterId(station, activeConnectorTypeIds);
 
-  return matchesAvailability && matchesSpeed && matchesArea && matchesOperator;
+  return matchesAvailability && matchesSpeed && matchesArea && matchesOperator && matchesConnectorType;
 }
 
 function toggleValue(values, value) {
@@ -1613,6 +1662,81 @@ function hasProviderFilterId(station, operatorIds) {
   const providerNames = uniqueProviderNames(station.providers?.length ? station.providers : [station.provider]);
 
   return providerNames.some((name) => operatorIds.has(`operator:${normalizeOperatorFilterValue(name)}`));
+}
+
+function hasConnectorTypeFilterId(station, connectorTypeIds) {
+  return station.plugTypes.some((plug) => {
+    const normalized = normalizeConnectorTypeValue(plug.plugType);
+    return normalized && connectorTypeIds.has(`connector:${normalized}`);
+  });
+}
+
+function buildConnectorTypeFilterOptions(stations) {
+  const connectors = new Map();
+
+  stations.forEach((station) => {
+    const seenForStation = new Set();
+
+    station.plugTypes.forEach((plug) => {
+      const normalized = normalizeConnectorTypeValue(plug.plugType);
+      if (!normalized || seenForStation.has(normalized)) return;
+      seenForStation.add(normalized);
+
+      const id = `connector:${normalized}`;
+      const existing = connectors.get(id);
+
+      if (existing) {
+        existing.stationCount += 1;
+        existing.availableCount += station.availableCount;
+        return;
+      }
+
+      connectors.set(id, {
+        id,
+        label: formatConnectorTypeLabel(plug.plugType),
+        Icon: Cable,
+        color: connectorTypeColor(normalized),
+        textColor: "#ffffff",
+        stationCount: 1,
+        availableCount: station.availableCount,
+      });
+    });
+  });
+
+  return [...connectors.values()].sort((a, b) => b.stationCount - a.stationCount || a.label.localeCompare(b.label));
+}
+
+function normalizeConnectorTypeValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function formatConnectorTypeLabel(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "Unknown";
+
+  return raw
+    .replace(/\btype\s*(\d)/i, "Type $1")
+    .replace(/\bccs\s*(\d?)/i, (_, n) => (n ? `CCS${n}` : "CCS"))
+    .replace(/\bchademo\b/i, "CHAdeMO")
+    .replace(/\bgbt\b/i, "GB/T")
+    .replace(/\btesla\b/i, "Tesla")
+    .replace(/\bnacs\b/i, "NACS")
+    .replace(/\bac\b/i, "AC")
+    .replace(/\bdc\b/i, "DC")
+    .trim();
+}
+
+function connectorTypeColor(normalized) {
+  if (/ccs/.test(normalized)) return "#7c3aed";
+  if (/chademo/.test(normalized)) return "#b45309";
+  if (/type\s*2|type2/.test(normalized)) return "#0f4c81";
+  if (/type\s*1|type1/.test(normalized)) return "#17875a";
+  if (/gbt|gb/.test(normalized)) return "#c2410c";
+  if (/tesla|nacs/.test(normalized)) return "#1d1d1d";
+  return "#334155";
 }
 
 function normalizeOperatorFilterValue(value) {
