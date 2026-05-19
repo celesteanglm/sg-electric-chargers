@@ -21,7 +21,7 @@ import {
 import { normalizeChargerStations } from "./lib/chargers.js";
 import { trackPageView } from "./lib/analytics.js";
 import { PLACE_SEARCH_RADIUS_METERS, buildSearchQuery, rankStationSearchMatches } from "./lib/search.js";
-import { canOpenProviderApp, getProviderAppTarget, getProviderProfile, openProviderApp } from "./data/providerApps.js";
+import { getProviderAppTarget, getProviderProfile, openProviderApp } from "./data/providerApps.js";
 
 const SINGAPORE_CENTER = [1.3521, 103.8198];
 const AREA_CENTER = { latitude: SINGAPORE_CENTER[0], longitude: SINGAPORE_CENTER[1] };
@@ -988,11 +988,36 @@ function MapBridge({ mapRef, onCenterChange }) {
   return null;
 }
 
+function getPerProviderStats(chargers) {
+  const stats = new Map();
+  for (const charger of chargers) {
+    const key = charger.providerKey || "unknown";
+    const connectors = charger.connectors || [];
+    if (!stats.has(key)) stats.set(key, { available: 0, total: 0 });
+    const entry = stats.get(key);
+    if (connectors.length > 0) {
+      entry.available += connectors.filter((c) => c.status === "available").length;
+      entry.total += connectors.length;
+    } else {
+      entry.total += 1;
+      if (charger.status === "available") entry.available += 1;
+    }
+  }
+  return stats;
+}
+
 function StationDetail({ station }) {
   const providers = station.providers?.length ? station.providers : [station.provider];
-  const appProviderName = providers.find((providerName) => canOpenProviderApp(providerName)) || station.provider;
-  const providerProfile = getProviderProfile(appProviderName);
-  const providerAppTarget = getProviderAppTarget(appProviderName);
+  const appTargets = providers
+    .map((providerName) => ({
+      providerName,
+      profile: getProviderProfile(providerName),
+      target: getProviderAppTarget(providerName),
+    }))
+    .filter(({ target }) => target.available);
+  const primaryAppTarget = appTargets.length === 0 ? getProviderAppTarget(providers[0]) : null;
+  const perProviderStats = getPerProviderStats(station.chargers || []);
+  const hasPerProviderStats = providers.length > 1 && perProviderStats.size > 1;
   const bestPlug = station.plugTypes[0];
 
   return (
@@ -1013,6 +1038,22 @@ function StationDetail({ station }) {
         <Metric label="Max speed" value={station.maxPowerKw ? `${station.maxPowerKw} kW` : "TBC"} />
         <Metric label="Plug" value={bestPlug?.plugType || "TBC"} />
       </div>
+
+      {hasPerProviderStats ? (
+        <div className="provider-plug-breakdown">
+          {providers.map((providerName) => {
+            const providerKey = getProviderProfile(providerName).key;
+            const stats = perProviderStats.get(providerKey);
+            if (!stats) return null;
+            return (
+              <div key={providerName} className="provider-plug-row">
+                <ProviderBadge providerName={providerName} compact />
+                <span className="provider-plug-count">{stats.available}/{stats.total} open</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="detail-meta">
         <span>
@@ -1039,18 +1080,26 @@ function StationDetail({ station }) {
           Open in Google Maps
         </a>
 
-        {providerAppTarget.available ? (
-          <button className="secondary-action" type="button" onClick={() => openProviderApp(appProviderName)}>
-            <ExternalLink size={18} />
-            Open {providerProfile.appName}
-          </button>
+        {appTargets.length > 0 ? (
+          appTargets.map(({ providerName, profile }) => (
+            <button
+              key={providerName}
+              className="secondary-action"
+              type="button"
+              onClick={() => openProviderApp(providerName)}
+              aria-label={`Open ${profile.appName}`}
+            >
+              <ExternalLink size={18} />
+              Open {profile.appName}
+            </button>
+          ))
         ) : (
           <div className="provider-unavailable">
             <button className="secondary-action unavailable" type="button" disabled>
               <Info size={18} />
               App link unavailable
             </button>
-            <p>{providerAppTarget.unavailableMessage}</p>
+            <p>{primaryAppTarget?.unavailableMessage}</p>
           </div>
         )}
       </div>

@@ -1134,6 +1134,29 @@ button {
   line-height: 1.35;
 }
 
+.provider-plug-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.provider-plug-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px 6px 6px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.provider-plug-count {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .nearby-header {
   display: flex;
   flex: 0 0 auto;
