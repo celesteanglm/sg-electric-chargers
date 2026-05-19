@@ -1641,16 +1641,21 @@ button {
     display: grid;
     place-items: center;
     position: relative;
-    flex: 0 0 28px;
+    flex: 0 0 36px;
     width: 100%;
-    height: 28px;
+    height: 36px;
     margin: 0 0 2px;
     padding: 0;
     background: transparent;
     border: 0;
     border-radius: 8px;
-    cursor: pointer;
+    cursor: grab;
     touch-action: none;
+    user-select: none;
+  }
+
+  .sheet-handle:active {
+    cursor: grabbing;
   }
 
   .sheet-handle-bar {

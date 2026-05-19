@@ -108,7 +108,11 @@ function ChargerMapPage({ onNavigate }) {
   const [sheetMode, setSheetMode] = useState(getInitialSheetMode);
   const [sheetHasUserInteracted, setSheetHasUserInteracted] = useState(false);
   const mapRef = useRef(null);
+  const sheetRef = useRef(null);
   const sheetDragStartY = useRef(null);
+  const sheetDragStartHeight = useRef(null);
+  const sheetLastPointerY = useRef(null);
+  const sheetLastPointerTime = useRef(null);
   const sheetDidDrag = useRef(false);
   const locationWatchId = useRef(null);
   const searchCandidatesRef = useRef([]);
@@ -522,21 +526,49 @@ function ChargerMapPage({ onNavigate }) {
     locationWatchId.current = null;
   }
 
+  function getSheetSnapHeights() {
+    return {
+      expandedHeight: Math.min(window.innerHeight * 0.68, 620),
+      collapsedHeight: Math.max(122, 108),
+    };
+  }
+
   function handleSheetPointerDown(event) {
     if (event.button != null && event.button !== 0) return;
 
     sheetDragStartY.current = event.clientY;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    sheetDragStartHeight.current = sheetRef.current?.offsetHeight ?? 0;
+    sheetLastPointerY.current = event.clientY;
+    sheetLastPointerTime.current = Date.now();
+    sheetDidDrag.current = false;
 
-    window.addEventListener(
-      "pointerup",
-      (pointerEvent) => {
-        if (pointerEvent.pointerId === event.pointerId) {
-          finishSheetDrag(pointerEvent.clientY);
-        }
-      },
-      { once: true },
-    );
+    if (sheetRef.current) {
+      sheetRef.current.style.transition = "none";
+    }
+
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleSheetPointerMove(event) {
+    if (sheetDragStartY.current == null || sheetDragStartHeight.current == null) return;
+
+    sheetLastPointerY.current = event.clientY;
+    sheetLastPointerTime.current = Date.now();
+
+    const delta = sheetDragStartY.current - event.clientY;
+    const { expandedHeight, collapsedHeight } = getSheetSnapHeights();
+    let newHeight = sheetDragStartHeight.current + delta;
+
+    // Rubber-band resistance at extremes
+    if (newHeight > expandedHeight) {
+      newHeight = expandedHeight + Math.log1p(newHeight - expandedHeight) * 5;
+    } else if (newHeight < collapsedHeight) {
+      newHeight = collapsedHeight - Math.log1p(collapsedHeight - newHeight) * 5;
+    }
+
+    if (sheetRef.current) {
+      sheetRef.current.style.height = `${newHeight}px`;
+    }
   }
 
   function handleSheetPointerUp(event) {
@@ -550,6 +582,11 @@ function ChargerMapPage({ onNavigate }) {
 
   function handleSheetPointerCancel(event) {
     sheetDragStartY.current = null;
+    sheetDragStartHeight.current = null;
+    if (sheetRef.current) {
+      sheetRef.current.style.transition = "";
+      sheetRef.current.style.height = "";
+    }
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -559,22 +596,51 @@ function ChargerMapPage({ onNavigate }) {
     if (sheetDragStartY.current != null || event.button !== 0) return;
 
     sheetDragStartY.current = event.clientY;
+    sheetDragStartHeight.current = sheetRef.current?.offsetHeight ?? 0;
+    sheetLastPointerY.current = event.clientY;
+    sheetLastPointerTime.current = Date.now();
 
+    if (sheetRef.current) {
+      sheetRef.current.style.transition = "none";
+    }
+
+    window.addEventListener("mousemove", handleMouseMoveDrag);
     window.addEventListener(
       "mouseup",
       (mouseEvent) => {
+        window.removeEventListener("mousemove", handleMouseMoveDrag);
         finishSheetDrag(mouseEvent.clientY);
       },
       { once: true },
     );
   }
 
+  function handleMouseMoveDrag(event) {
+    handleSheetPointerMove(event);
+  }
+
   function finishSheetDrag(endY) {
     if (sheetDragStartY.current == null) return;
 
-    const deltaY = endY - sheetDragStartY.current;
+    const startY = sheetDragStartY.current;
+    const startHeight = sheetDragStartHeight.current ?? 0;
+    const deltaY = endY - startY;
     sheetDragStartY.current = null;
+    sheetDragStartHeight.current = null;
     sheetDidDrag.current = Math.abs(deltaY) > SHEET_DRAG_THRESHOLD_PX;
+
+    // Velocity from last recorded position (flick detection)
+    const elapsed = Date.now() - (sheetLastPointerTime.current ?? Date.now());
+    const velocityY =
+      elapsed < 300
+        ? (endY - (sheetLastPointerY.current ?? endY)) / Math.max(elapsed, 1)
+        : 0;
+
+    // Re-enable CSS transition, clear inline height so the class takes over
+    if (sheetRef.current) {
+      sheetRef.current.style.transition = "";
+      sheetRef.current.style.height = "";
+    }
 
     if (sheetDidDrag.current) {
       window.setTimeout(() => {
@@ -582,12 +648,22 @@ function ChargerMapPage({ onNavigate }) {
       }, 400);
     }
 
-    if (deltaY > SHEET_DRAG_THRESHOLD_PX) {
+    const { expandedHeight, collapsedHeight } = getSheetSnapHeights();
+    const drawnHeight = startHeight - deltaY;
+
+    let newMode = null;
+    if (velocityY > 0.5) {
+      newMode = "collapsed";
+    } else if (velocityY < -0.5) {
+      newMode = "expanded";
+    } else if (sheetDidDrag.current) {
+      const midpoint = (expandedHeight + collapsedHeight) / 2;
+      newMode = drawnHeight > midpoint ? "expanded" : "collapsed";
+    }
+
+    if (newMode) {
       setSheetHasUserInteracted(true);
-      setSheetMode("collapsed");
-    } else if (deltaY < -SHEET_DRAG_THRESHOLD_PX) {
-      setSheetHasUserInteracted(true);
-      setSheetMode("expanded");
+      setSheetMode(newMode);
     }
   }
 
@@ -809,12 +885,13 @@ function ChargerMapPage({ onNavigate }) {
         </MapContainer>
       </section>
 
-      <section className={`bottom-sheet sheet-${sheetMode}`} aria-label="Charger details and results">
+      <section ref={sheetRef} className={`bottom-sheet sheet-${sheetMode}`} aria-label="Charger details and results">
         <button
           className="sheet-handle"
           type="button"
           onClick={toggleSheetMode}
           onPointerDown={handleSheetPointerDown}
+          onPointerMove={handleSheetPointerMove}
           onPointerUp={handleSheetPointerUp}
           onPointerCancel={handleSheetPointerCancel}
           onMouseDown={handleSheetMouseDown}
