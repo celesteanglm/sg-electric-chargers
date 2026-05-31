@@ -1,8 +1,14 @@
-# ChargeSG
+# BoCharge
 
 Mobile-first Singapore EV charger map.
 
-Product planning notes live in [docs/todo.md](docs/todo.md).
+Product planning notes live in [docs/todo.md](docs/todo.md). Data and third-party asset notices live in [NOTICE.md](NOTICE.md).
+
+## Project Status
+
+BoCharge is an open-source web app for finding EV charging stations in Singapore. The app uses a Node/Express API, a Vite/React frontend, LTA DataMall for charger data, optional OneMap place search, optional Google Analytics, and OpenStreetMap tiles.
+
+Production deployments should keep API credentials server-side, run one replica unless shared caching is added, and validate LTA/OneMap terms before redistributing derived data outside this app.
 
 ## Data Source And Refresh Cadence
 
@@ -109,9 +115,12 @@ Open `http://127.0.0.1:8787`.
 Useful checks:
 
 ```bash
+npm run check
 curl http://127.0.0.1:8787/api/health
 curl http://127.0.0.1:8787/api/chargers
 ```
+
+`npm run check` runs the production dependency audit and frontend build. Pull requests should pass this before merge.
 
 ## Railway Runbook
 
@@ -184,6 +193,14 @@ Expected live health response:
 ## Provider App Links
 
 Provider app store IDs live in `src/data/providerAppStoreMappings.js`. The mobile CTA derives App Store and Google Play URLs from that mapping, then uses OS-aware store handoff for iOS and Android. If a provider publishes a stable app-specific deep link later, add it in `src/data/providerApps.js` without touching the map UI.
+
+## Open Source
+
+- Code is licensed under [MIT](LICENSE).
+- Contributions should follow [CONTRIBUTING.md](CONTRIBUTING.md).
+- Security reports should follow [SECURITY.md](SECURITY.md).
+- Privacy behavior is documented in [PRIVACY.md](PRIVACY.md).
+- Third-party data, map tiles, provider logos, app-store data, and trademarks are not relicensed by this repository.
 
 ## References
 

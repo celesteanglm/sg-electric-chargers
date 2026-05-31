@@ -35,11 +35,11 @@ const SHEET_DRAG_THRESHOLD_PX = 44;
 const MOBILE_SHEET_QUERY = "(max-width: 860px)";
 const RESULT_PAGE_SIZE = 10;
 const AREA_FILTERS = [
+  { id: "central", label: "Central", color: "#08a7d8", textColor: "#06283a" },
   { id: "north", label: "North", color: "#17875a", textColor: "#ffffff" },
   { id: "south", label: "South", color: "#0f4c81", textColor: "#ffffff" },
   { id: "east", label: "East", color: "#f97316", textColor: "#17201c" },
   { id: "west", label: "West", color: "#7c3aed", textColor: "#ffffff" },
-  { id: "central", label: "Central", color: "#08a7d8", textColor: "#06283a" },
 ];
 const ALL_FILTER = { id: "all", label: "All", Icon: CircleDot, color: "#08283f", textColor: "#ffffff" };
 const QUICK_FILTERS = [
@@ -54,7 +54,7 @@ const QUICK_FILTERS = [
   { id: "fast", stateKey: "fastOnly", label: "Fast", Icon: PlugZap, color: "#08a7d8", textColor: "#06283a" },
 ];
 
-// Module-level icon cache — keyed by providerKey + status + selected
+// Module-level icon cache keyed by the marker content that affects rendering.
 const iconCache = new Map();
 
 // Static icons that never change
@@ -132,7 +132,9 @@ function ChargerMapPage({ onNavigate }) {
   const sheetDragStartY = useRef(null);
   const sheetDidDrag = useRef(false);
   const locationWatchId = useRef(null);
-  const filteredStationsRef = useRef([]);
+  const searchCandidatesRef = useRef([]);
+  const selectedFiltersRef = useRef(selectedFilters);
+  const applyingLocationAreaFilter = useRef(false);
   const areaFilters = useMemo(() => buildAreaFilterOptions(stations), [stations]);
   const operatorFilters = useMemo(() => buildOperatorFilterOptions(stations), [stations]);
   const activeAreaIds = useMemo(() => new Set(selectedFilters.areas), [selectedFilters.areas]);
@@ -267,8 +269,12 @@ function ChargerMapPage({ onNavigate }) {
   }, [filteredStations, mapBounds]);
 
   useEffect(() => {
-    filteredStationsRef.current = filteredStations;
-  }, [filteredStations]);
+    searchCandidatesRef.current = searchCandidates;
+  }, [searchCandidates]);
+
+  useEffect(() => {
+    selectedFiltersRef.current = selectedFilters;
+  }, [selectedFilters]);
 
   const hiddenSearchMatchCount = searchQuery.active ? Math.max(0, searchCandidates.length - filteredStations.length) : 0;
   const rankingOrigin = searchOrigin || userLocation || mapCenter;
@@ -357,7 +363,7 @@ function ChargerMapPage({ onNavigate }) {
   useEffect(() => {
     if (stations.length === 0) return;
 
-    setSelectedFilters((current) => {
+    updateSelectedFilters((current) => {
       const availableAreaIds = new Set(areaFilters.map((item) => item.areaId));
       const availableOperatorIds = new Set(operatorFilters.map((item) => item.id));
       const nextAreas = current.areas.filter((areaId) => availableAreaIds.has(areaId));
@@ -374,6 +380,12 @@ function ChargerMapPage({ onNavigate }) {
   }, [areaFilters, operatorFilters, stations.length]);
 
   useEffect(() => {
+    if (applyingLocationAreaFilter.current) {
+      applyingLocationAreaFilter.current = false;
+      setSelectionMode("auto");
+      return;
+    }
+
     setLocationNotice("");
     setSelectionMode("auto");
   }, [query, selectedFilters]);
@@ -425,6 +437,14 @@ function ChargerMapPage({ onNavigate }) {
     setMapBounds(bounds);
   }, []);
 
+  function updateSelectedFilters(updater) {
+    setSelectedFilters((current) => {
+      const nextFilters = typeof updater === "function" ? updater(current) : updater;
+      selectedFiltersRef.current = nextFilters;
+      return nextFilters;
+    });
+  }
+
   const selectStation = useCallback((station) => {
     setSelectionMode("manual");
     setSelectedId(station.id);
@@ -470,14 +490,34 @@ function ChargerMapPage({ onNavigate }) {
   function handleUserPosition(position, { focusNearest }) {
     const nextLocation = [position.coords.latitude, position.coords.longitude];
     const locationAccuracyLabel = formatAccuracyMeters(position.coords.accuracy);
-    const currentFilteredStations = filteredStationsRef.current;
+    const locationArea = getStationArea({ latitude: nextLocation[0], longitude: nextLocation[1] });
+    const nextFilters = applyAreaFilter(selectedFiltersRef.current, locationArea.id);
+    const areaFilterChanged = nextFilters !== selectedFiltersRef.current;
+    const nextActiveAreaIds = new Set(nextFilters.areas);
+    const nextActiveOperatorIds = new Set(nextFilters.operators);
+    const currentFilteredStations = searchCandidatesRef.current.filter((station) =>
+      stationPassesFilters(station, nextFilters, nextActiveAreaIds, nextActiveOperatorIds),
+    );
 
     setUserLocation((current) => (current && isSameMapCenter(current, nextLocation) ? current : nextLocation));
     setUserLocationAccuracy(position.coords.accuracy);
 
+    if (areaFilterChanged) {
+      applyingLocationAreaFilter.current = true;
+      selectedFiltersRef.current = nextFilters;
+      updateSelectedFilters(nextFilters);
+    }
+
     if (currentFilteredStations.length === 0) {
       if (focusNearest) {
-        setLocationNotice("No visible chargers match the current filters.");
+        setLocationNotice(
+          [
+            areaFilterChanged ? `Switched area filter to ${locationArea.label}.` : "",
+            "No visible chargers match the current filters.",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
         mapRef.current?.flyTo(nextLocation, 16, { duration: 0.45 });
       }
       return;
@@ -499,6 +539,7 @@ function ChargerMapPage({ onNavigate }) {
     setSheetMode("expanded");
     setLocationNotice(
       [
+        areaFilterChanged ? `Switched area filter to ${locationArea.label}.` : "",
         "Tracking your location and selected the closest charger in the current filtered list.",
         locationAccuracyLabel ? `Accuracy: ${locationAccuracyLabel}.` : "",
       ]
@@ -617,25 +658,25 @@ function ChargerMapPage({ onNavigate }) {
   useEffect(() => { setFilterNoticeDismissed(false); }, [filterContextNotice]);
 
   function clearFilters() {
-    setSelectedFilters(createAllFilterState());
+    updateSelectedFilters(createAllFilterState());
   }
 
   function toggleQuickFilter(stateKey) {
-    setSelectedFilters((current) => ({
+    updateSelectedFilters((current) => ({
       ...current,
       [stateKey]: !current[stateKey],
     }));
   }
 
   function toggleAreaFilter(areaId) {
-    setSelectedFilters((current) => ({
+    updateSelectedFilters((current) => ({
       ...current,
       areas: toggleValue(current.areas, areaId),
     }));
   }
 
   function toggleOperatorFilter(operatorId) {
-    setSelectedFilters((current) => ({
+    updateSelectedFilters((current) => ({
       ...current,
       operators: toggleValue(current.operators, operatorId),
     }));
@@ -1323,10 +1364,12 @@ function StatusPill({ status }) {
 }
 
 function createStationIcon(station, selected) {
-  const key = `${station.providerKey}-${station.status}-${selected ? 1 : 0}`;
+  const providerProfile = getProviderProfile(station.provider);
+  const unknownProviderKey =
+    providerProfile.key === "unknown" ? `${station.providerLabel || station.provider}-${station.providerInitials || ""}` : "";
+  const key = `${providerProfile.key}-${unknownProviderKey}-${station.status}-${selected ? 1 : 0}`;
   if (iconCache.has(key)) return iconCache.get(key);
 
-  const providerProfile = getProviderProfile(station.provider);
   const className = [
     "pin",
     `pin-provider-${providerProfile.key}`,
@@ -1411,6 +1454,15 @@ function createAllFilterState() {
     fastOnly: false,
     areas: [],
     operators: [],
+  };
+}
+
+function applyAreaFilter(filters, areaId) {
+  if (filters.areas.length === 1 && filters.areas[0] === areaId) return filters;
+
+  return {
+    ...filters,
+    areas: [areaId],
   };
 }
 
