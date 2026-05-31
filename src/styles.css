@@ -87,7 +87,7 @@ button {
 
 .brand-row,
 .search-box,
-.filter-scroller {
+.filter-bar {
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(190, 216, 206, 0.96);
   box-shadow: var(--shadow-tight);
@@ -358,6 +358,97 @@ button {
   color: var(--muted);
   background: transparent;
   cursor: pointer;
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 44px;
+  padding: 5px 6px;
+  border-radius: 8px;
+}
+
+.filter-quick-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.filter-panel-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: rgba(8, 40, 63, 0.06);
+  border: 1px solid rgba(8, 40, 63, 0.13);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    box-shadow 140ms ease,
+    border-color 140ms ease;
+}
+
+.filter-panel-toggle:hover {
+  background: rgba(8, 40, 63, 0.1);
+  box-shadow: 0 4px 10px rgba(8, 40, 63, 0.09);
+}
+
+.filter-panel-toggle.has-filters {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(255, 248, 220, 0.98)), var(--surface-warm);
+  border-color: var(--amber);
+  box-shadow: inset 0 -2px 0 rgba(8, 40, 63, 0.1);
+}
+
+.filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  color: #ffffff;
+  background: var(--ink);
+  border-radius: 100px;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.filter-panel {
+  padding: 12px 12px 10px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(190, 216, 206, 0.96);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(20px) saturate(1.08);
+  display: grid;
+  gap: 12px;
+}
+
+.filter-section-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.filter-section-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .filter-scroller {
@@ -1562,17 +1653,22 @@ button {
     display: none;
   }
 
-  .filter-scroller {
+  .filter-bar {
     gap: 5px;
     min-height: 42px;
     padding: 5px;
   }
 
-  .filter-rail-label {
-    justify-content: center;
-    width: 34px;
-    padding: 0;
-    font-size: 0;
+  .filter-panel-toggle {
+    height: 30px;
+    padding: 0 8px;
+  }
+
+  .filter-panel {
+    max-height: calc(100dvh - 310px - max(12px, env(safe-area-inset-bottom)));
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(8, 40, 63, 0.18) transparent;
   }
 
   .filter-divider {
@@ -1851,10 +1947,6 @@ button {
 
   .operator-chip {
     max-width: 168px;
-  }
-
-  .operator-chip-name {
-    max-width: 104px;
   }
 
   .summary-strip {
