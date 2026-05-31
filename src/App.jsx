@@ -32,6 +32,10 @@ const CLIENT_REFRESH_MS = 5 * 60 * 1000;
 const SG_TIME_ZONE = "Asia/Singapore";
 const FEEDBACK_EMAIL = "celeste@agents.world";
 const SHEET_DRAG_THRESHOLD_PX = 44;
+const SHEET_CONTENT_DRAG_THRESHOLD_PX = 6;
+const SHEET_VELOCITY_SAMPLE_MS = 140;
+const SHEET_FLICK_VELOCITY_PX_PER_MS = 0.45;
+const SHEET_MIN_VELOCITY_DISTANCE_PX = 8;
 const MOBILE_SHEET_QUERY = "(max-width: 860px)";
 const RESULT_PAGE_SIZE = 10;
 const AREA_FILTERS = [
@@ -131,10 +135,11 @@ function ChargerMapPage({ onNavigate }) {
   const mapRef = useRef(null);
   const sheetRef = useRef(null);
   const sheetContentRef = useRef(null);
-  const sheetDragStartY = useRef(null);
-  const sheetDragStartHeight = useRef(null);
-  const sheetLastPointerY = useRef(null);
-  const sheetLastPointerTime = useRef(null);
+  const sheetDragState = useRef(null);
+  const sheetDragSamples = useRef([]);
+  const sheetDragWindowCleanup = useRef(null);
+  const pendingContentDrag = useRef(null);
+  const pendingContentDragCleanup = useRef(null);
   const sheetDidDrag = useRef(false);
   const locationWatchId = useRef(null);
   const searchCandidatesRef = useRef([]);
@@ -238,7 +243,14 @@ function ChargerMapPage({ onNavigate }) {
     return () => mediaQuery.removeEventListener("change", syncMobileDefaultSheet);
   }, [sheetHasUserInteracted]);
 
-  useEffect(() => () => stopLocationWatch(), []);
+  useEffect(
+    () => () => {
+      stopLocationWatch();
+      cleanupPendingContentDrag();
+      cancelSheetDrag();
+    },
+    [],
+  );
 
   // On iOS Safari, dynamically setting touch-action is ignored — the browser
   // reads it at gesture start, before our JS can update it. The only reliable
@@ -253,12 +265,21 @@ function ChargerMapPage({ onNavigate }) {
     let touchStartScrollTop = null;
 
     function onTouchStart(e) {
+      if (sheetMode !== "expanded" || e.touches.length !== 1 || isInteractiveSheetTarget(e.target)) {
+        touchStartY = null;
+        touchStartScrollTop = null;
+        return;
+      }
+
       touchStartY = e.touches[0].clientY;
       touchStartScrollTop = content.scrollTop;
     }
 
     function onTouchMove(e) {
-      if (touchStartScrollTop === null || touchStartScrollTop > 1) return;
+      if (e.touches.length !== 1 || touchStartY === null || touchStartScrollTop === null || touchStartScrollTop > 1) {
+        return;
+      }
+
       const delta = e.touches[0].clientY - touchStartY;
       if (delta > 0) {
         // Downward drag at scroll top: block browser scroll so pointer
@@ -283,7 +304,7 @@ function ChargerMapPage({ onNavigate }) {
       content.removeEventListener("touchend", onTouchEnd);
       content.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, []);
+  }, [sheetMode]);
 
   const searchQuery = useMemo(() => buildSearchQuery(query), [query]);
   const textSearchMatches = useMemo(() => rankStationSearchMatches(stations, searchQuery), [stations, searchQuery]);
@@ -613,142 +634,106 @@ function ChargerMapPage({ onNavigate }) {
     };
   }
 
-  function handleSheetPointerDown(event) {
-    if (event.button != null && event.button !== 0) return;
-    if (sheetDragStartY.current != null) return; // already started (e.g. bubbled from child)
+  function startSheetDrag(
+    event,
+    { source, startY = event.clientY, captureTarget = event.currentTarget, skipButtonCheck = false } = {},
+  ) {
+    if (!skipButtonCheck && event.button != null && event.button !== 0) return false;
+    if (event.pointerType === "touch" && !event.isPrimary) return false;
+    if (sheetDragState.current || !sheetRef.current) return false;
 
-    sheetDragStartY.current = event.clientY;
-    sheetDragStartHeight.current = sheetRef.current?.offsetHeight ?? 0;
-    sheetLastPointerY.current = event.clientY;
-    sheetLastPointerTime.current = Date.now();
+    const startTime = performance.now();
+    sheetDragState.current = {
+      captureTarget,
+      pointerId: event.pointerId,
+      source,
+      startHeight: sheetRef.current.offsetHeight,
+      startTime,
+      startY,
+    };
+    sheetDragSamples.current = [{ time: startTime, y: startY }];
     sheetDidDrag.current = false;
 
-    if (sheetRef.current) {
-      sheetRef.current.style.transition = "none";
-      sheetRef.current.classList.add("is-dragging");
-    }
+    sheetRef.current.style.transition = "none";
+    sheetRef.current.classList.add("is-dragging");
 
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setPointerCapture(captureTarget, event.pointerId);
+    attachSheetDragWindowListeners();
+    return true;
   }
 
-  function handleSheetPointerMove(event) {
-    if (sheetDragStartY.current == null || sheetDragStartHeight.current == null) return;
+  function moveSheetDrag(clientY) {
+    const drag = sheetDragState.current;
+    if (!drag || !sheetRef.current) return;
 
-    sheetLastPointerY.current = event.clientY;
-    sheetLastPointerTime.current = Date.now();
+    recordSheetDragSample(clientY);
 
-    const delta = sheetDragStartY.current - event.clientY;
+    const delta = drag.startY - clientY;
     const { expandedHeight, collapsedHeight } = getSheetSnapHeights();
-    let newHeight = sheetDragStartHeight.current + delta;
+    let newHeight = drag.startHeight + delta;
 
-    // Rubber-band resistance at extremes
     if (newHeight > expandedHeight) {
       newHeight = expandedHeight + Math.log1p(newHeight - expandedHeight) * 5;
     } else if (newHeight < collapsedHeight) {
       newHeight = collapsedHeight - Math.log1p(collapsedHeight - newHeight) * 5;
     }
 
-    if (sheetRef.current) {
-      sheetRef.current.style.height = `${newHeight}px`;
-    }
-  }
-
-  function handleSheetPointerUp(event) {
-    if (sheetDragStartY.current == null) return;
-
-    finishSheetDrag(event.clientY);
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
-
-  function handleSheetPointerCancel(event) {
-    sheetDragStartY.current = null;
-    sheetDragStartHeight.current = null;
-    if (sheetRef.current) {
-      sheetRef.current.style.transition = "";
-      sheetRef.current.style.height = "";
-      sheetRef.current.classList.remove("is-dragging");
-    }
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
-
-  function handleSheetMouseDown(event) {
-    if (sheetDragStartY.current != null || event.button !== 0) return;
-
-    sheetDragStartY.current = event.clientY;
-    sheetDragStartHeight.current = sheetRef.current?.offsetHeight ?? 0;
-    sheetLastPointerY.current = event.clientY;
-    sheetLastPointerTime.current = Date.now();
-
-    if (sheetRef.current) {
-      sheetRef.current.style.transition = "none";
-      sheetRef.current.classList.add("is-dragging");
-    }
-
-    window.addEventListener("mousemove", handleMouseMoveDrag);
-    window.addEventListener(
-      "mouseup",
-      (mouseEvent) => {
-        window.removeEventListener("mousemove", handleMouseMoveDrag);
-        finishSheetDrag(mouseEvent.clientY);
-      },
-      { once: true },
-    );
-  }
-
-  function handleMouseMoveDrag(event) {
-    handleSheetPointerMove(event);
+    sheetRef.current.style.height = `${newHeight}px`;
   }
 
   function finishSheetDrag(endY) {
-    if (sheetDragStartY.current == null) return;
+    const drag = sheetDragState.current;
+    if (!drag) return;
 
-    const startY = sheetDragStartY.current;
-    const startHeight = sheetDragStartHeight.current ?? 0;
-    const deltaY = endY - startY;
-    sheetDragStartY.current = null;
-    sheetDragStartHeight.current = null;
-    sheetDidDrag.current = Math.abs(deltaY) > SHEET_DRAG_THRESHOLD_PX;
-
-    // Velocity from last recorded position (flick detection)
-    const elapsed = Date.now() - (sheetLastPointerTime.current ?? Date.now());
-    const velocityY =
-      elapsed < 300
-        ? (endY - (sheetLastPointerY.current ?? endY)) / Math.max(elapsed, 1)
-        : 0;
-
-    // Re-enable CSS transition, clear inline height so the class takes over
-    if (sheetRef.current) {
-      sheetRef.current.style.transition = "";
-      sheetRef.current.style.height = "";
-      sheetRef.current.classList.remove("is-dragging");
-    }
-
-    if (sheetDidDrag.current) {
-      window.setTimeout(() => {
-        sheetDidDrag.current = false;
-      }, 400);
-    }
-
+    const deltaY = endY - drag.startY;
+    const velocityY = getSheetDragVelocity(endY);
+    const draggedFar = Math.abs(deltaY) > SHEET_DRAG_THRESHOLD_PX;
     const { expandedHeight, collapsedHeight } = getSheetSnapHeights();
-    const drawnHeight = startHeight - deltaY;
+    const drawnHeight = drag.startHeight - deltaY;
 
     let newMode = null;
-    if (velocityY > 0.5) {
+    if (velocityY > SHEET_FLICK_VELOCITY_PX_PER_MS) {
       newMode = "collapsed";
-    } else if (velocityY < -0.5) {
+    } else if (velocityY < -SHEET_FLICK_VELOCITY_PX_PER_MS) {
       newMode = "expanded";
-    } else if (sheetDidDrag.current) {
+    } else if (draggedFar) {
       const midpoint = (expandedHeight + collapsedHeight) / 2;
       newMode = drawnHeight > midpoint ? "expanded" : "collapsed";
     }
 
+    cleanupSheetDrag();
+
     if (newMode) {
+      sheetDidDrag.current = true;
+      window.setTimeout(() => {
+        sheetDidDrag.current = false;
+      }, 400);
+
       setSheetHasUserInteracted(true);
       setSheetMode(newMode);
+    }
+  }
+
+  function cancelSheetDrag() {
+    cleanupSheetDrag();
+  }
+
+  function cleanupSheetDrag() {
+    const drag = sheetDragState.current;
+    removeSheetDragWindowListeners();
+    cleanupPendingContentDrag();
+
+    if (drag?.captureTarget) {
+      releasePointerCapture(drag.captureTarget, drag.pointerId);
+    }
+
+    sheetDragState.current = null;
+    sheetDragSamples.current = [];
+
+    if (sheetRef.current) {
+      sheetRef.current.style.transition = "";
+      sheetRef.current.style.height = "";
+      sheetRef.current.classList.remove("is-dragging");
     }
   }
 
@@ -762,53 +747,180 @@ function ChargerMapPage({ onNavigate }) {
     setSheetMode((current) => (current === "expanded" ? "collapsed" : "expanded"));
   }
 
-  // Allows dragging the sheet closed by pulling down from the content area when
-  // already scrolled to the very top. touch-action:pan-up on the content element
-  // (set via the scroll-listener effect above) prevents the browser from ever
-  // starting a native scroll for downward pans when at the top, so our handler
-  // gets exclusive control without a race against the browser scroller.
+  function handleSheetPointerDown(event) {
+    startSheetDrag(event, { source: "handle" });
+  }
+
+  function handleCollapsedSheetPointerDown(event) {
+    if (sheetMode !== "collapsed") return;
+    startSheetDrag(event, { source: "collapsed" });
+  }
+
   function handleContentPointerDown(event) {
     if (event.button != null && event.button !== 0) return;
     if (sheetMode !== "expanded") return;
+    if (event.pointerType === "touch" && !event.isPrimary) {
+      cleanupPendingContentDrag();
+      cancelSheetDrag();
+      return;
+    }
+    if (sheetDragState.current || pendingContentDrag.current) return;
+    if (isInteractiveSheetTarget(event.target)) return;
 
     const content = event.currentTarget;
-    if (content.scrollTop > 1) return; // not at top; browser handles scroll normally
+    if (content.scrollTop > 1) return;
 
-    const startY = event.clientY;
-    let dragActive = false;
+    pendingContentDrag.current = {
+      content,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+    };
+    attachPendingContentDragListeners();
+  }
 
-    function onContentMove(moveEvent) {
-      const delta = moveEvent.clientY - startY;
-      if (!dragActive && delta > 4) {
-        dragActive = true;
-        sheetDragStartY.current = startY;
-        sheetDragStartHeight.current = sheetRef.current?.offsetHeight ?? 0;
-        sheetLastPointerY.current = startY;
-        sheetLastPointerTime.current = Date.now();
-        if (sheetRef.current) {
-          sheetRef.current.style.transition = "none";
-          sheetRef.current.classList.add("is-dragging");
-        }
-      }
-      if (dragActive) {
-        moveEvent.preventDefault();
-        handleSheetPointerMove(moveEvent);
-      }
+  function handleSheetWindowPointerMove(event) {
+    const drag = sheetDragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    event.preventDefault();
+    moveSheetDrag(event.clientY);
+  }
+
+  function handleSheetWindowPointerUp(event) {
+    const drag = sheetDragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    finishSheetDrag(event.clientY);
+  }
+
+  function handleSheetWindowPointerCancel(event) {
+    const drag = sheetDragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    cancelSheetDrag();
+  }
+
+  function handlePendingContentPointerMove(event) {
+    const pending = pendingContentDrag.current;
+    if (!pending || event.pointerId !== pending.pointerId) return;
+
+    const deltaY = event.clientY - pending.startY;
+    if (deltaY < -SHEET_CONTENT_DRAG_THRESHOLD_PX || pending.content.scrollTop > 1) {
+      cleanupPendingContentDrag();
+      return;
     }
 
-    function onContentUp(upEvent) {
-      content.removeEventListener("pointermove", onContentMove);
-      content.removeEventListener("pointerup", onContentUp);
-      content.removeEventListener("pointercancel", onContentUp);
-      if (dragActive) {
-        dragActive = false;
-        finishSheetDrag(upEvent.clientY);
-      }
-    }
+    if (deltaY <= SHEET_CONTENT_DRAG_THRESHOLD_PX) return;
 
-    content.addEventListener("pointermove", onContentMove, { passive: false });
-    content.addEventListener("pointerup", onContentUp, { once: true });
-    content.addEventListener("pointercancel", onContentUp, { once: true });
+    const started = startSheetDrag(event, {
+      captureTarget: pending.content,
+      skipButtonCheck: true,
+      source: "content",
+      startY: pending.startY,
+    });
+    cleanupPendingContentDrag();
+
+    if (started) {
+      event.preventDefault();
+      moveSheetDrag(event.clientY);
+    }
+  }
+
+  function handlePendingContentPointerEnd(event) {
+    const pending = pendingContentDrag.current;
+    if (!pending || event.pointerId !== pending.pointerId) return;
+
+    cleanupPendingContentDrag();
+  }
+
+  function attachSheetDragWindowListeners() {
+    removeSheetDragWindowListeners();
+    const handleMove = handleSheetWindowPointerMove;
+    const handleUp = handleSheetWindowPointerUp;
+    const handleCancel = handleSheetWindowPointerCancel;
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleCancel);
+    sheetDragWindowCleanup.current = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleCancel);
+    };
+  }
+
+  function removeSheetDragWindowListeners() {
+    sheetDragWindowCleanup.current?.();
+    sheetDragWindowCleanup.current = null;
+  }
+
+  function attachPendingContentDragListeners() {
+    removePendingContentDragListeners();
+    const handleMove = handlePendingContentPointerMove;
+    const handleEnd = handlePendingContentPointerEnd;
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
+    pendingContentDragCleanup.current = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+    };
+  }
+
+  function removePendingContentDragListeners() {
+    pendingContentDragCleanup.current?.();
+    pendingContentDragCleanup.current = null;
+  }
+
+  function cleanupPendingContentDrag() {
+    removePendingContentDragListeners();
+    pendingContentDrag.current = null;
+  }
+
+  function recordSheetDragSample(y) {
+    const now = performance.now();
+    const samples = [...sheetDragSamples.current, { time: now, y }].filter(
+      (sample) => now - sample.time <= SHEET_VELOCITY_SAMPLE_MS,
+    );
+    sheetDragSamples.current = samples;
+  }
+
+  function getSheetDragVelocity(endY) {
+    const now = performance.now();
+    const samples = [...sheetDragSamples.current, { time: now, y: endY }];
+    const anchor = samples.find((sample) => now - sample.time <= SHEET_VELOCITY_SAMPLE_MS && now > sample.time);
+    if (!anchor) return 0;
+
+    const elapsed = now - anchor.time;
+    const distance = endY - anchor.y;
+    if (elapsed <= 0 || Math.abs(distance) < SHEET_MIN_VELOCITY_DISTANCE_PX) return 0;
+
+    return distance / elapsed;
+  }
+
+  function setPointerCapture(target, pointerId) {
+    try {
+      target?.setPointerCapture?.(pointerId);
+    } catch {
+      // Capture can fail if the browser has already canceled the pointer.
+    }
+  }
+
+  function releasePointerCapture(target, pointerId) {
+    try {
+      if (target?.hasPointerCapture?.(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
+    } catch {
+      // Ignore stale pointer ids during cancellation.
+    }
+  }
+
+  function isInteractiveSheetTarget(target) {
+    return Boolean(
+      target instanceof Element &&
+        target.closest("a, button, input, select, textarea, [role='button'], [contenteditable='true']"),
+    );
   }
 
   const openConnectorCount = filteredStations.reduce((sum, station) => sum + station.availableCount, 0);
@@ -1013,20 +1125,13 @@ function ChargerMapPage({ onNavigate }) {
         ref={sheetRef}
         className={`bottom-sheet sheet-${sheetMode}`}
         aria-label="Charger details and results"
-        onPointerDown={sheetMode === "collapsed" ? handleSheetPointerDown : undefined}
-        onPointerMove={sheetMode === "collapsed" ? handleSheetPointerMove : undefined}
-        onPointerUp={sheetMode === "collapsed" ? handleSheetPointerUp : undefined}
-        onPointerCancel={sheetMode === "collapsed" ? handleSheetPointerCancel : undefined}
+        onPointerDown={sheetMode === "collapsed" ? handleCollapsedSheetPointerDown : undefined}
       >
         <button
           className="sheet-handle"
           type="button"
           onClick={toggleSheetMode}
           onPointerDown={handleSheetPointerDown}
-          onPointerMove={handleSheetPointerMove}
-          onPointerUp={handleSheetPointerUp}
-          onPointerCancel={handleSheetPointerCancel}
-          onMouseDown={handleSheetMouseDown}
           aria-expanded={sheetMode === "expanded"}
           aria-label={sheetMode === "expanded" ? "Collapse charger details" : "Expand charger details"}
         >
