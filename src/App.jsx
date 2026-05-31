@@ -32,6 +32,10 @@ const CLIENT_REFRESH_MS = 5 * 60 * 1000;
 const SG_TIME_ZONE = "Asia/Singapore";
 const FEEDBACK_EMAIL = "celeste@agents.world";
 const SHEET_DRAG_THRESHOLD_PX = 44;
+const SHEET_CONTENT_DRAG_THRESHOLD_PX = 6;
+const SHEET_VELOCITY_SAMPLE_MS = 140;
+const SHEET_FLICK_VELOCITY_PX_PER_MS = 0.45;
+const SHEET_MIN_VELOCITY_DISTANCE_PX = 8;
 const MOBILE_SHEET_QUERY = "(max-width: 860px)";
 const RESULT_PAGE_SIZE = 10;
 const AREA_FILTERS = [
@@ -129,7 +133,13 @@ function ChargerMapPage({ onNavigate }) {
   const [sheetMode, setSheetMode] = useState(getInitialSheetMode);
   const [sheetHasUserInteracted, setSheetHasUserInteracted] = useState(false);
   const mapRef = useRef(null);
-  const sheetDragStartY = useRef(null);
+  const sheetRef = useRef(null);
+  const sheetContentRef = useRef(null);
+  const sheetDragState = useRef(null);
+  const sheetDragSamples = useRef([]);
+  const sheetDragWindowCleanup = useRef(null);
+  const pendingContentDrag = useRef(null);
+  const pendingContentDragCleanup = useRef(null);
   const sheetDidDrag = useRef(false);
   const locationWatchId = useRef(null);
   const searchCandidatesRef = useRef([]);
@@ -233,7 +243,68 @@ function ChargerMapPage({ onNavigate }) {
     return () => mediaQuery.removeEventListener("change", syncMobileDefaultSheet);
   }, [sheetHasUserInteracted]);
 
-  useEffect(() => () => stopLocationWatch(), []);
+  useEffect(
+    () => () => {
+      stopLocationWatch();
+      cleanupPendingContentDrag();
+      cancelSheetDrag();
+    },
+    [],
+  );
+
+  // On iOS Safari, dynamically setting touch-action is ignored — the browser
+  // reads it at gesture start, before our JS can update it. The only reliable
+  // way to prevent the browser from scrolling the content when we want to
+  // drag the sheet closed is a non-passive touchmove listener that calls
+  // preventDefault() for downward gestures when already at scroll top.
+  useEffect(() => {
+    const content = sheetContentRef.current;
+    if (!content) return;
+
+    let touchStartY = null;
+    let touchStartScrollTop = null;
+
+    function onTouchStart(e) {
+      if (sheetMode !== "expanded" || e.touches.length !== 1 || isInteractiveSheetTarget(e.target)) {
+        touchStartY = null;
+        touchStartScrollTop = null;
+        return;
+      }
+
+      touchStartY = e.touches[0].clientY;
+      touchStartScrollTop = content.scrollTop;
+    }
+
+    function onTouchMove(e) {
+      if (e.touches.length !== 1 || touchStartY === null || touchStartScrollTop === null || touchStartScrollTop > 1) {
+        return;
+      }
+
+      const delta = e.touches[0].clientY - touchStartY;
+      if (delta > 0) {
+        // Downward drag at scroll top: block browser scroll so pointer
+        // events can drive the sheet-drag gesture instead.
+        e.preventDefault();
+      }
+    }
+
+    function onTouchEnd() {
+      touchStartY = null;
+      touchStartScrollTop = null;
+    }
+
+    content.addEventListener("touchstart", onTouchStart, { passive: true });
+    content.addEventListener("touchmove", onTouchMove, { passive: false });
+    content.addEventListener("touchend", onTouchEnd, { passive: true });
+    content.addEventListener("touchcancel", onTouchEnd, { passive: true });
+
+    return () => {
+      content.removeEventListener("touchstart", onTouchStart);
+      content.removeEventListener("touchmove", onTouchMove);
+      content.removeEventListener("touchend", onTouchEnd);
+      content.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [sheetMode]);
 
   const searchQuery = useMemo(() => buildSearchQuery(query), [query]);
   const textSearchMatches = useMemo(() => rankStationSearchMatches(stations, searchQuery), [stations, searchQuery]);
@@ -556,72 +627,113 @@ function ChargerMapPage({ onNavigate }) {
     locationWatchId.current = null;
   }
 
-  function handleSheetPointerDown(event) {
-    if (event.button != null && event.button !== 0) return;
-
-    sheetDragStartY.current = event.clientY;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-
-    window.addEventListener(
-      "pointerup",
-      (pointerEvent) => {
-        if (pointerEvent.pointerId === event.pointerId) {
-          finishSheetDrag(pointerEvent.clientY);
-        }
-      },
-      { once: true },
-    );
+  function getSheetSnapHeights() {
+    return {
+      expandedHeight: Math.min(window.innerHeight * 0.68, 620),
+      collapsedHeight: Math.max(122, 108),
+    };
   }
 
-  function handleSheetPointerUp(event) {
-    if (sheetDragStartY.current == null) return;
+  function startSheetDrag(
+    event,
+    { source, startY = event.clientY, captureTarget = event.currentTarget, skipButtonCheck = false } = {},
+  ) {
+    if (!skipButtonCheck && event.button != null && event.button !== 0) return false;
+    if (event.pointerType === "touch" && !event.isPrimary) return false;
+    if (sheetDragState.current || !sheetRef.current) return false;
 
-    finishSheetDrag(event.clientY);
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    const startTime = performance.now();
+    sheetDragState.current = {
+      captureTarget,
+      pointerId: event.pointerId,
+      source,
+      startHeight: sheetRef.current.offsetHeight,
+      startTime,
+      startY,
+    };
+    sheetDragSamples.current = [{ time: startTime, y: startY }];
+    sheetDidDrag.current = false;
+
+    sheetRef.current.style.transition = "none";
+    sheetRef.current.classList.add("is-dragging");
+
+    setPointerCapture(captureTarget, event.pointerId);
+    attachSheetDragWindowListeners();
+    return true;
+  }
+
+  function moveSheetDrag(clientY) {
+    const drag = sheetDragState.current;
+    if (!drag || !sheetRef.current) return;
+
+    recordSheetDragSample(clientY);
+
+    const delta = drag.startY - clientY;
+    const { expandedHeight, collapsedHeight } = getSheetSnapHeights();
+    let newHeight = drag.startHeight + delta;
+
+    if (newHeight > expandedHeight) {
+      newHeight = expandedHeight + Math.log1p(newHeight - expandedHeight) * 5;
+    } else if (newHeight < collapsedHeight) {
+      newHeight = collapsedHeight - Math.log1p(collapsedHeight - newHeight) * 5;
     }
-  }
 
-  function handleSheetPointerCancel(event) {
-    sheetDragStartY.current = null;
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
-
-  function handleSheetMouseDown(event) {
-    if (sheetDragStartY.current != null || event.button !== 0) return;
-
-    sheetDragStartY.current = event.clientY;
-
-    window.addEventListener(
-      "mouseup",
-      (mouseEvent) => {
-        finishSheetDrag(mouseEvent.clientY);
-      },
-      { once: true },
-    );
+    sheetRef.current.style.height = `${newHeight}px`;
   }
 
   function finishSheetDrag(endY) {
-    if (sheetDragStartY.current == null) return;
+    const drag = sheetDragState.current;
+    if (!drag) return;
 
-    const deltaY = endY - sheetDragStartY.current;
-    sheetDragStartY.current = null;
-    sheetDidDrag.current = Math.abs(deltaY) > SHEET_DRAG_THRESHOLD_PX;
+    const deltaY = endY - drag.startY;
+    const velocityY = getSheetDragVelocity(endY);
+    const draggedFar = Math.abs(deltaY) > SHEET_DRAG_THRESHOLD_PX;
+    const { expandedHeight, collapsedHeight } = getSheetSnapHeights();
+    const drawnHeight = drag.startHeight - deltaY;
 
-    if (sheetDidDrag.current) {
+    let newMode = null;
+    if (velocityY > SHEET_FLICK_VELOCITY_PX_PER_MS) {
+      newMode = "collapsed";
+    } else if (velocityY < -SHEET_FLICK_VELOCITY_PX_PER_MS) {
+      newMode = "expanded";
+    } else if (draggedFar) {
+      const midpoint = (expandedHeight + collapsedHeight) / 2;
+      newMode = drawnHeight > midpoint ? "expanded" : "collapsed";
+    }
+
+    cleanupSheetDrag();
+
+    if (newMode) {
+      sheetDidDrag.current = true;
       window.setTimeout(() => {
         sheetDidDrag.current = false;
       }, 400);
+
+      setSheetHasUserInteracted(true);
+      setSheetMode(newMode);
+    }
+  }
+
+  function cancelSheetDrag() {
+    cleanupSheetDrag();
+  }
+
+  function cleanupSheetDrag() {
+    const drag = sheetDragState.current;
+    removeSheetDragWindowListeners();
+    cleanupPendingContentDrag();
+
+    if (drag?.captureTarget) {
+      releasePointerCapture(drag.captureTarget, drag.pointerId);
     }
 
-    if (deltaY > SHEET_DRAG_THRESHOLD_PX) {
-      setSheetHasUserInteracted(true);
-      setSheetMode("collapsed");
-    } else if (deltaY < -SHEET_DRAG_THRESHOLD_PX) {
-      setSheetHasUserInteracted(true);
-      setSheetMode("expanded");
+    sheetDragState.current = null;
+    sheetDragSamples.current = [];
+
+    if (sheetRef.current) {
+      sheetRef.current.style.transition = "";
+      sheetRef.current.style.height = "";
+      sheetRef.current.classList.remove("is-dragging");
     }
   }
 
@@ -633,6 +745,182 @@ function ChargerMapPage({ onNavigate }) {
 
     setSheetHasUserInteracted(true);
     setSheetMode((current) => (current === "expanded" ? "collapsed" : "expanded"));
+  }
+
+  function handleSheetPointerDown(event) {
+    startSheetDrag(event, { source: "handle" });
+  }
+
+  function handleCollapsedSheetPointerDown(event) {
+    if (sheetMode !== "collapsed") return;
+    startSheetDrag(event, { source: "collapsed" });
+  }
+
+  function handleContentPointerDown(event) {
+    if (event.button != null && event.button !== 0) return;
+    if (sheetMode !== "expanded") return;
+    if (event.pointerType === "touch" && !event.isPrimary) {
+      cleanupPendingContentDrag();
+      cancelSheetDrag();
+      return;
+    }
+    if (sheetDragState.current || pendingContentDrag.current) return;
+    if (isInteractiveSheetTarget(event.target)) return;
+
+    const content = event.currentTarget;
+    if (content.scrollTop > 1) return;
+
+    pendingContentDrag.current = {
+      content,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+    };
+    attachPendingContentDragListeners();
+  }
+
+  function handleSheetWindowPointerMove(event) {
+    const drag = sheetDragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    event.preventDefault();
+    moveSheetDrag(event.clientY);
+  }
+
+  function handleSheetWindowPointerUp(event) {
+    const drag = sheetDragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    finishSheetDrag(event.clientY);
+  }
+
+  function handleSheetWindowPointerCancel(event) {
+    const drag = sheetDragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    cancelSheetDrag();
+  }
+
+  function handlePendingContentPointerMove(event) {
+    const pending = pendingContentDrag.current;
+    if (!pending || event.pointerId !== pending.pointerId) return;
+
+    const deltaY = event.clientY - pending.startY;
+    if (deltaY < -SHEET_CONTENT_DRAG_THRESHOLD_PX || pending.content.scrollTop > 1) {
+      cleanupPendingContentDrag();
+      return;
+    }
+
+    if (deltaY <= SHEET_CONTENT_DRAG_THRESHOLD_PX) return;
+
+    const started = startSheetDrag(event, {
+      captureTarget: pending.content,
+      skipButtonCheck: true,
+      source: "content",
+      startY: pending.startY,
+    });
+    cleanupPendingContentDrag();
+
+    if (started) {
+      event.preventDefault();
+      moveSheetDrag(event.clientY);
+    }
+  }
+
+  function handlePendingContentPointerEnd(event) {
+    const pending = pendingContentDrag.current;
+    if (!pending || event.pointerId !== pending.pointerId) return;
+
+    cleanupPendingContentDrag();
+  }
+
+  function attachSheetDragWindowListeners() {
+    removeSheetDragWindowListeners();
+    const handleMove = handleSheetWindowPointerMove;
+    const handleUp = handleSheetWindowPointerUp;
+    const handleCancel = handleSheetWindowPointerCancel;
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleCancel);
+    sheetDragWindowCleanup.current = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleCancel);
+    };
+  }
+
+  function removeSheetDragWindowListeners() {
+    sheetDragWindowCleanup.current?.();
+    sheetDragWindowCleanup.current = null;
+  }
+
+  function attachPendingContentDragListeners() {
+    removePendingContentDragListeners();
+    const handleMove = handlePendingContentPointerMove;
+    const handleEnd = handlePendingContentPointerEnd;
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
+    pendingContentDragCleanup.current = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+    };
+  }
+
+  function removePendingContentDragListeners() {
+    pendingContentDragCleanup.current?.();
+    pendingContentDragCleanup.current = null;
+  }
+
+  function cleanupPendingContentDrag() {
+    removePendingContentDragListeners();
+    pendingContentDrag.current = null;
+  }
+
+  function recordSheetDragSample(y) {
+    const now = performance.now();
+    const samples = [...sheetDragSamples.current, { time: now, y }].filter(
+      (sample) => now - sample.time <= SHEET_VELOCITY_SAMPLE_MS,
+    );
+    sheetDragSamples.current = samples;
+  }
+
+  function getSheetDragVelocity(endY) {
+    const now = performance.now();
+    const samples = [...sheetDragSamples.current, { time: now, y: endY }];
+    const anchor = samples.find((sample) => now - sample.time <= SHEET_VELOCITY_SAMPLE_MS && now > sample.time);
+    if (!anchor) return 0;
+
+    const elapsed = now - anchor.time;
+    const distance = endY - anchor.y;
+    if (elapsed <= 0 || Math.abs(distance) < SHEET_MIN_VELOCITY_DISTANCE_PX) return 0;
+
+    return distance / elapsed;
+  }
+
+  function setPointerCapture(target, pointerId) {
+    try {
+      target?.setPointerCapture?.(pointerId);
+    } catch {
+      // Capture can fail if the browser has already canceled the pointer.
+    }
+  }
+
+  function releasePointerCapture(target, pointerId) {
+    try {
+      if (target?.hasPointerCapture?.(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
+    } catch {
+      // Ignore stale pointer ids during cancellation.
+    }
+  }
+
+  function isInteractiveSheetTarget(target) {
+    return Boolean(
+      target instanceof Element &&
+        target.closest("a, button, input, select, textarea, [role='button'], [contenteditable='true']"),
+    );
   }
 
   const openConnectorCount = filteredStations.reduce((sum, station) => sum + station.availableCount, 0);
@@ -833,15 +1121,17 @@ function ChargerMapPage({ onNavigate }) {
         </MapContainer>
       </section>
 
-      <section className={`bottom-sheet sheet-${sheetMode}`} aria-label="Charger details and results">
+      <section
+        ref={sheetRef}
+        className={`bottom-sheet sheet-${sheetMode}`}
+        aria-label="Charger details and results"
+        onPointerDown={sheetMode === "collapsed" ? handleCollapsedSheetPointerDown : undefined}
+      >
         <button
           className="sheet-handle"
           type="button"
           onClick={toggleSheetMode}
           onPointerDown={handleSheetPointerDown}
-          onPointerUp={handleSheetPointerUp}
-          onPointerCancel={handleSheetPointerCancel}
-          onMouseDown={handleSheetMouseDown}
           aria-expanded={sheetMode === "expanded"}
           aria-label={sheetMode === "expanded" ? "Collapse charger details" : "Expand charger details"}
         >
@@ -849,7 +1139,7 @@ function ChargerMapPage({ onNavigate }) {
           {sheetMode === "collapsed" ? <ChevronsUp className="sheet-swipe-cue" size={18} aria-hidden="true" /> : null}
         </button>
 
-        <div className="sheet-content">
+        <div ref={sheetContentRef} className="sheet-content" onPointerDown={handleContentPointerDown}>
           <div className="panel-kicker">
             <span>
               <PlugZap size={15} aria-hidden="true" />
