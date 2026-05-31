@@ -650,13 +650,6 @@ function ChargerMapPage({ onNavigate }) {
         ? placeSearchWarning
         : "";
   const topNotice = locationNotice || searchNotice;
-  const filterContextNotice = isDefaultCentralAvailabilityFilter(selectedFilters)
-    ? "Central + available filters are on. Add areas or clear filters to see more."
-    : "";
-
-  const [filterNoticeDismissed, setFilterNoticeDismissed] = useState(false);
-  useEffect(() => { setFilterNoticeDismissed(false); }, [filterContextNotice]);
-
   function clearFilters() {
     updateSelectedFilters(createAllFilterState());
   }
@@ -788,14 +781,6 @@ function ChargerMapPage({ onNavigate }) {
           </div>
 
           {topNotice ? <div className="location-notice">{topNotice}</div> : null}
-          {filterContextNotice && !filterNoticeDismissed ? (
-            <div className="filter-context-notice">
-              {filterContextNotice}
-              <button type="button" className="notice-dismiss" onClick={() => setFilterNoticeDismissed(true)} aria-label="Dismiss">
-                <X size={14} />
-              </button>
-            </div>
-          ) : null}
         </div>
 
         <MapContainer
@@ -1443,7 +1428,7 @@ function createDefaultFilterState() {
   return {
     availableOnly: true,
     fastOnly: false,
-    areas: ["central"],
+    areas: [],
     operators: [],
   };
 }
@@ -1468,16 +1453,6 @@ function applyAreaFilter(filters, areaId) {
 
 function hasActiveFilters(filters) {
   return Boolean(filters.availableOnly || filters.fastOnly || filters.areas.length > 0 || filters.operators.length > 0);
-}
-
-function isDefaultCentralAvailabilityFilter(filters) {
-  return (
-    filters.availableOnly &&
-    !filters.fastOnly &&
-    filters.areas.length === 1 &&
-    filters.areas[0] === "central" &&
-    filters.operators.length === 0
-  );
 }
 
 function stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds) {

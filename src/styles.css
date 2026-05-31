@@ -562,8 +562,7 @@ button {
   text-transform: uppercase;
 }
 
-.location-notice,
-.filter-context-notice {
+.location-notice {
   padding: 10px 12px;
   color: #405049;
   background: rgba(255, 255, 255, 0.93);
@@ -574,41 +573,6 @@ button {
   font-weight: 800;
   line-height: 1.35;
   backdrop-filter: blur(18px);
-}
-
-.filter-context-notice {
-  padding: 8px 10px;
-  color: #5d7068;
-  background: rgba(250, 253, 251, 0.76);
-  border-color: rgba(190, 216, 206, 0.68);
-  box-shadow: 0 5px 12px rgba(8, 40, 63, 0.06);
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.notice-dismiss {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  margin-top: -1px;
-  color: #6a7d74;
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-  opacity: 0.56;
-}
-
-.notice-dismiss:hover {
-  opacity: 1;
-  background: rgba(24, 191, 115, 0.15);
 }
 
 .station-marker {
