@@ -7,6 +7,8 @@ import {
   ArrowLeft,
   BatteryCharging,
   Cable,
+  ChevronLeft,
+  ChevronRight,
   ChevronsUp,
   CircleDot,
   Clock,
@@ -130,7 +132,7 @@ function ChargerMapPage({ onNavigate }) {
   const [isLocating, setIsLocating] = useState(false);
   const [mapCenter, setMapCenter] = useState(SINGAPORE_CENTER);
   const [mapBounds, setMapBounds] = useState(null);
-  const [visibleResultCount, setVisibleResultCount] = useState(RESULT_PAGE_SIZE);
+  const [resultPage, setResultPage] = useState(1);
   const [locationNotice, setLocationNotice] = useState("");
   const [sheetMode, setSheetMode] = useState(getInitialSheetMode);
   const [sheetHasUserInteracted, setSheetHasUserInteracted] = useState(false);
@@ -366,11 +368,21 @@ function ChargerMapPage({ onNavigate }) {
     [filteredStations, rankingOrigin, searchOrigin, searchQuery.active, textSearchScoreById],
   );
 
-  const visibleRankedStations = rankedStations.slice(0, visibleResultCount);
-  const hasMoreResults = visibleRankedStations.length < rankedStations.length;
+  const pageCount = Math.max(1, Math.ceil(rankedStations.length / RESULT_PAGE_SIZE));
+  const clampedResultPage = Math.min(Math.max(resultPage, 1), pageCount);
+  const pageStart = rankedStations.length > 0 ? (clampedResultPage - 1) * RESULT_PAGE_SIZE : 0;
+  const pageEnd = rankedStations.length > 0 ? Math.min(pageStart + RESULT_PAGE_SIZE, rankedStations.length) : 0;
+  const visibleRankedStations = rankedStations.slice(pageStart, pageEnd);
+  const firstVisibleStation = visibleRankedStations[0]?.station || null;
+  const firstVisibleStationId = firstVisibleStation?.id || null;
+  const hasMultipleResultPages = pageCount > 1;
   const distanceSourceLabel = searchPlace ? searchPlace.label : userLocation ? "you" : "";
+  const resultRangeLabel =
+    rankedStations.length > 0
+      ? `${formatCompactCount(pageStart + 1)}-${formatCompactCount(pageEnd)}`
+      : "0";
   const resultSummary = [
-    `Showing ${formatCompactCount(visibleRankedStations.length)} of ${formatCompactCount(rankedStations.length)}`,
+    `Showing ${resultRangeLabel} of ${formatCompactCount(rankedStations.length)}`,
     searchPlace ? `nearest to ${searchPlace.label}` : userLocation ? "nearest to you" : "tap location for distance",
     placeSearchStatus === "loading" ? "checking place" : "",
   ]
@@ -497,8 +509,12 @@ function ChargerMapPage({ onNavigate }) {
   }, [query, selectedFilters]);
 
   useEffect(() => {
-    setVisibleResultCount(RESULT_PAGE_SIZE);
+    setResultPage(1);
   }, [rankingOrigin, query, selectedFilters]);
+
+  useEffect(() => {
+    setResultPage((currentPage) => Math.min(Math.max(currentPage, 1), pageCount));
+  }, [pageCount]);
 
   useEffect(() => {
     if (!searchOrigin || filteredStations.length === 0) return;
@@ -509,14 +525,14 @@ function ChargerMapPage({ onNavigate }) {
     setSheetHasUserInteracted(true);
     setSelectionMode("auto");
     setSelectedId(nearestStation.id);
-    setVisibleResultCount(RESULT_PAGE_SIZE);
+    setResultPage(1);
     setSheetMode("expanded");
     zoomToLocationAndStation(mapRef.current, searchOrigin, nearestStation);
   }, [filteredStations, searchOrigin]);
 
   const selectedStation =
     filteredStations.length > 0
-      ? filteredStations.find((station) => station.id === selectedId) || rankedStations[0]?.station || null
+      ? filteredStations.find((station) => station.id === selectedId) || firstVisibleStation
       : null;
 
   useEffect(() => {
@@ -525,15 +541,14 @@ function ChargerMapPage({ onNavigate }) {
       return;
     }
 
-    const nearestVisibleStationId = rankedStations[0]?.station.id || null;
     setSelectedId((current) => {
       if (selectionMode === "manual" && current && filteredStations.some((station) => station.id === current)) {
         return current;
       }
 
-      return nearestVisibleStationId;
+      return firstVisibleStationId;
     });
-  }, [filteredStations, rankedStations, selectionMode]);
+  }, [filteredStations, firstVisibleStationId, selectionMode]);
 
   const handleMapCenterChange = useCallback((nextCenter) => {
     setMapCenter((current) => (isSameMapCenter(current, nextCenter) ? current : nextCenter));
@@ -560,6 +575,18 @@ function ChargerMapPage({ onNavigate }) {
       duration: 0.35,
     });
   }, [mapRef]);
+
+  const handleResultPageChange = useCallback((nextPage) => {
+    const clampedPage = Math.min(Math.max(nextPage, 1), pageCount);
+    const firstStationOnPage = rankedStations[(clampedPage - 1) * RESULT_PAGE_SIZE]?.station;
+
+    setResultPage(clampedPage);
+
+    if (firstStationOnPage) {
+      setSelectionMode("auto");
+      setSelectedId(firstStationOnPage.id);
+    }
+  }, [pageCount, rankedStations]);
 
   function handleLocateMe() {
     if (isLocating) return;
@@ -641,7 +668,7 @@ function ChargerMapPage({ onNavigate }) {
 
     setSelectionMode("auto");
     setSelectedId(nearestStation.id);
-    setVisibleResultCount(RESULT_PAGE_SIZE);
+    setResultPage(1);
     setSheetHasUserInteracted(true);
     setSheetMode("expanded");
     setLocationNotice(
@@ -1281,14 +1308,28 @@ function ChargerMapPage({ onNavigate }) {
 
           </div>
 
-          {hasMoreResults ? (
-            <div className="station-list-footer">
+          {hasMultipleResultPages ? (
+            <div className="pagination-footer" aria-label="Available charger result pages">
               <button
                 type="button"
-                className="show-more-button"
-                onClick={() => setVisibleResultCount((count) => count + RESULT_PAGE_SIZE)}
+                className="pagination-button"
+                onClick={() => handleResultPageChange(clampedResultPage - 1)}
+                disabled={clampedResultPage <= 1}
+                aria-label="Previous charger results page"
               >
-                Show more
+                <ChevronLeft size={17} />
+              </button>
+              <span className="pagination-status">
+                Page {clampedResultPage} of {pageCount}
+              </span>
+              <button
+                type="button"
+                className="pagination-button"
+                onClick={() => handleResultPageChange(clampedResultPage + 1)}
+                disabled={clampedResultPage >= pageCount}
+                aria-label="Next charger results page"
+              >
+                <ChevronRight size={17} />
               </button>
             </div>
           ) : null}

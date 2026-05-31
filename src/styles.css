@@ -1394,13 +1394,6 @@ button {
   line-height: 1;
 }
 
-.station-list-footer {
-  display: flex;
-  flex: 0 0 auto;
-  justify-content: center;
-  padding: 10px 0 2px;
-}
-
 .show-more-button {
   min-height: 40px;
   padding: 0 16px;
@@ -1417,6 +1410,54 @@ button {
 .show-more-button:hover {
   border-color: rgba(8, 167, 216, 0.32);
   box-shadow: 0 10px 22px rgba(8, 40, 63, 0.1);
+}
+
+.pagination-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 0 2px;
+}
+
+.pagination-button {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  color: var(--ink);
+  background: #ffffff;
+  border: 1px solid #cfe3db;
+  border-radius: 8px;
+  box-shadow: 0 8px 18px rgba(8, 40, 63, 0.07);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    opacity 140ms ease;
+}
+
+.pagination-button:hover:not(:disabled) {
+  border-color: rgba(8, 167, 216, 0.32);
+  box-shadow: 0 10px 22px rgba(8, 40, 63, 0.1);
+}
+
+.pagination-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  box-shadow: none;
+}
+
+.pagination-status {
+  min-width: 92px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .empty-state {
@@ -1784,7 +1825,7 @@ button {
   .bottom-sheet.sheet-collapsed .detail-card,
   .bottom-sheet.sheet-collapsed .nearby-header,
   .bottom-sheet.sheet-collapsed .station-list,
-  .bottom-sheet.sheet-collapsed .station-list-footer {
+  .bottom-sheet.sheet-collapsed .pagination-footer {
     display: none;
   }
 
@@ -1798,7 +1839,7 @@ button {
   }
 
   .bottom-sheet.is-dragging.sheet-collapsed .nearby-header,
-  .bottom-sheet.is-dragging.sheet-collapsed .station-list-footer {
+  .bottom-sheet.is-dragging.sheet-collapsed .pagination-footer {
     display: flex;
   }
 
@@ -1842,6 +1883,7 @@ button {
   }
 
   .station-list {
+    flex: 0 0 auto;
     overflow: visible;
     padding-bottom: 24px;
   }
