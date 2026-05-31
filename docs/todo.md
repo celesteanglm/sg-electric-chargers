@@ -1,6 +1,6 @@
-# BoCharge Product TODOs
+# BoCharge Roadmap Notes
 
-Personal bookkeeping for product ideas that should be planned before implementation.
+Product ideas that should be planned before implementation.
 
 ## Saved Chargers
 

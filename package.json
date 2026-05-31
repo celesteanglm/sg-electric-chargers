@@ -1,7 +1,7 @@
 {
-  "name": "electric-chargers",
+  "name": "sg-electric-chargers",
   "version": "1.0.0",
-  "description": "Mobile-friendly Singapore EV charger map backed by LTA DataMall.",
+  "description": "BoCharge is a mobile-friendly Singapore EV charger map backed by LTA DataMall.",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,green \"node --watch server/index.mjs\" \"vite --host 127.0.0.1\"",
@@ -11,21 +11,46 @@
     "preview": "vite preview --host 127.0.0.1",
     "data:refresh": "node scripts/refresh-sample-data.mjs",
     "research:providers": "node scripts/research-providers.mjs",
-    "start": "NODE_ENV=production node server/index.mjs"
+    "start": "NODE_ENV=production node server/index.mjs",
+    "audit:prod": "npm audit --omit=dev --audit-level=moderate",
+    "check": "npm run audit:prod && npm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "UNLICENSED",
+  "keywords": [
+    "bocharge",
+    "singapore",
+    "ev",
+    "electric-vehicle",
+    "chargers",
+    "lta-datamall",
+    "react",
+    "vite"
+  ],
+  "homepage": "https://github.com/celesteanglm/sg-electric-chargers#readme",
+  "bugs": {
+    "url": "https://github.com/celesteanglm/sg-electric-chargers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/celesteanglm/sg-electric-chargers.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0",
+    "npm": ">=10"
+  },
   "dependencies": {
-    "@vitejs/plugin-react": "^6.0.2",
-    "concurrently": "^9.2.1",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "leaflet": "^1.9.4",
+    "leaflet.markercluster": "^1.5.3",
     "lucide-react": "^1.16.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-leaflet": "^5.0.0",
+    "react-leaflet": "^5.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^9.2.1",
     "vite": "^8.0.13"
   }
 }

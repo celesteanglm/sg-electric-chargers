@@ -8,6 +8,7 @@ import { normalizeSearchText } from "../src/lib/search.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
+const distDir = path.join(rootDir, "dist");
 const samplePath = path.join(rootDir, "public", "data", "sample-chargers.json");
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || "0.0.0.0";
@@ -108,10 +109,24 @@ app.get("/api/search-place", async (req, res) => {
   }
 });
 
-app.use(express.static(path.join(rootDir, "dist")));
+app.use(
+  express.static(distDir, {
+    setHeaders(res, filePath) {
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        return;
+      }
+
+      if (path.basename(filePath) === "index.html") {
+        res.setHeader("Cache-Control", "no-cache");
+      }
+    },
+  }),
+);
 
 app.get(/.*/, (_req, res) => {
-  res.sendFile(path.join(rootDir, "dist", "index.html"));
+  res.set("Cache-Control", "no-cache");
+  res.sendFile(path.join(distDir, "index.html"));
 });
 
 app.listen(port, host, () => {

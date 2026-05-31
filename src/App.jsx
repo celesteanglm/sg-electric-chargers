@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import {
   ArrowLeft,
@@ -33,11 +35,11 @@ const SHEET_DRAG_THRESHOLD_PX = 44;
 const MOBILE_SHEET_QUERY = "(max-width: 860px)";
 const RESULT_PAGE_SIZE = 10;
 const AREA_FILTERS = [
+  { id: "central", label: "Central", color: "#08a7d8", textColor: "#06283a" },
   { id: "north", label: "North", color: "#17875a", textColor: "#ffffff" },
   { id: "south", label: "South", color: "#0f4c81", textColor: "#ffffff" },
   { id: "east", label: "East", color: "#f97316", textColor: "#17201c" },
   { id: "west", label: "West", color: "#7c3aed", textColor: "#ffffff" },
-  { id: "central", label: "Central", color: "#08a7d8", textColor: "#06283a" },
 ];
 const ALL_FILTER = { id: "all", label: "All", Icon: CircleDot, color: "#08283f", textColor: "#ffffff" };
 const QUICK_FILTERS = [
@@ -51,6 +53,24 @@ const QUICK_FILTERS = [
   },
   { id: "fast", stateKey: "fastOnly", label: "Fast", Icon: PlugZap, color: "#08a7d8", textColor: "#06283a" },
 ];
+
+// Module-level icon cache keyed by the marker content that affects rendering.
+const iconCache = new Map();
+
+// Static icons that never change
+const USER_ICON = L.divIcon({
+  className: "user-marker",
+  html: '<span class="user-pin"><span></span></span>',
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+
+const SEARCH_PLACE_ICON = L.divIcon({
+  className: "search-place-marker",
+  html: '<span class="search-place-pin"><span></span></span>',
+  iconSize: [26, 26],
+  iconAnchor: [13, 13],
+});
 
 export default function App() {
   const [path, setPath] = useState(() => window.location.pathname);
@@ -103,6 +123,7 @@ function ChargerMapPage({ onNavigate }) {
   const [userLocationAccuracy, setUserLocationAccuracy] = useState(null);
   const [isLocating, setIsLocating] = useState(false);
   const [mapCenter, setMapCenter] = useState(SINGAPORE_CENTER);
+  const [mapBounds, setMapBounds] = useState(null);
   const [visibleResultCount, setVisibleResultCount] = useState(RESULT_PAGE_SIZE);
   const [locationNotice, setLocationNotice] = useState("");
   const [sheetMode, setSheetMode] = useState(getInitialSheetMode);
@@ -288,6 +309,15 @@ function ChargerMapPage({ onNavigate }) {
     [activeAreaIds, activeOperatorIds, searchCandidates, selectedFilters],
   );
 
+  // Viewport culling — only render markers visible on the map (with padding buffer)
+  const viewportStations = useMemo(() => {
+    if (!mapBounds) return filteredStations;
+    const paddedBounds = mapBounds.pad(0.2);
+    return filteredStations.filter((station) =>
+      paddedBounds.contains([station.latitude, station.longitude]),
+    );
+  }, [filteredStations, mapBounds]);
+
   useEffect(() => {
     searchCandidatesRef.current = searchCandidates;
   }, [searchCandidates]);
@@ -453,6 +483,10 @@ function ChargerMapPage({ onNavigate }) {
     setMapCenter((current) => (isSameMapCenter(current, nextCenter) ? current : nextCenter));
   }, []);
 
+  const handleBoundsChange = useCallback((bounds) => {
+    setMapBounds(bounds);
+  }, []);
+
   function updateSelectedFilters(updater) {
     setSelectedFilters((current) => {
       const nextFilters = typeof updater === "function" ? updater(current) : updater;
@@ -461,7 +495,7 @@ function ChargerMapPage({ onNavigate }) {
     });
   }
 
-  function selectStation(station) {
+  const selectStation = useCallback((station) => {
     setSelectionMode("manual");
     setSelectedId(station.id);
     setSheetHasUserInteracted(true);
@@ -469,7 +503,7 @@ function ChargerMapPage({ onNavigate }) {
     mapRef.current?.flyTo([station.latitude, station.longitude], Math.max(mapRef.current.getZoom(), 14), {
       duration: 0.35,
     });
-  }
+  }, [mapRef]);
 
   function handleLocateMe() {
     if (isLocating) return;
@@ -949,28 +983,18 @@ function ChargerMapPage({ onNavigate }) {
           scrollWheelZoom
           className="charger-map"
         >
-          <MapBridge mapRef={mapRef} onCenterChange={handleMapCenterChange} />
+          <MapBridge mapRef={mapRef} onCenterChange={handleMapCenterChange} onBoundsChange={handleBoundsChange} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          {filteredStations.map((station) => (
-            <Marker
-              key={station.id}
-              position={[station.latitude, station.longitude]}
-              icon={createStationIcon(station, station.id === selectedStation?.id)}
-              eventHandlers={{
-                click: () => selectStation(station),
-              }}
-            >
-              <Popup>
-                <strong>{station.name}</strong>
-                <span>{station.providerLabel || station.provider}</span>
-              </Popup>
-            </Marker>
-          ))}
+          <ClusterLayer
+            stations={viewportStations}
+            selectedStationId={selectedStation?.id}
+            onSelectStation={selectStation}
+          />
           {userLocation ? (
-            <Marker position={userLocation} icon={createUserIcon()} zIndexOffset={1000}>
+            <Marker position={userLocation} icon={USER_ICON} zIndexOffset={1000}>
               <Popup>
                 <strong>Your location</strong>
                 {formatAccuracyMeters(userLocationAccuracy) ? <span>Accuracy {formatAccuracyMeters(userLocationAccuracy)}</span> : null}
@@ -978,7 +1002,7 @@ function ChargerMapPage({ onNavigate }) {
             </Marker>
           ) : null}
           {searchPlace ? (
-            <Marker position={[searchPlace.latitude, searchPlace.longitude]} icon={createSearchPlaceIcon()}>
+            <Marker position={[searchPlace.latitude, searchPlace.longitude]} icon={SEARCH_PLACE_ICON}>
               <Popup>{searchPlace.label}</Popup>
             </Marker>
           ) : null}
@@ -1238,7 +1262,7 @@ function getInitialSheetMode() {
   return window.matchMedia(MOBILE_SHEET_QUERY).matches ? "collapsed" : "expanded";
 }
 
-function MapBridge({ mapRef, onCenterChange }) {
+function MapBridge({ mapRef, onCenterChange, onBoundsChange }) {
   const map = useMap();
 
   useEffect(() => {
@@ -1246,18 +1270,70 @@ function MapBridge({ mapRef, onCenterChange }) {
   }, [map, mapRef]);
 
   useEffect(() => {
-    function syncCenter() {
+    function syncState() {
       const center = map.getCenter();
       onCenterChange([center.lat, center.lng]);
+      onBoundsChange(map.getBounds());
     }
 
-    syncCenter();
-    map.on("moveend zoomend", syncCenter);
+    syncState();
+    map.on("moveend zoomend", syncState);
 
     return () => {
-      map.off("moveend zoomend", syncCenter);
+      map.off("moveend zoomend", syncState);
     };
-  }, [map, onCenterChange]);
+  }, [map, onCenterChange, onBoundsChange]);
+
+  return null;
+}
+
+function ClusterLayer({ stations, selectedStationId, onSelectStation }) {
+  const map = useMap();
+  const clusterGroupRef = useRef(null);
+
+  useEffect(() => {
+    const clusterGroup = L.markerClusterGroup({
+      disableClusteringAtZoom: 14,
+      spiderfyOnMaxZoom: false,
+      spiderifyOnMaxZoom: false,
+      maxClusterRadius: 60,
+      iconCreateFunction(cluster) {
+        const count = cluster.getChildCount();
+        return L.divIcon({
+          className: "cluster-marker",
+          html: `<span class="cluster-pin">${count}</span>`,
+          iconSize: [40, 40],
+          iconAnchor: [20, 20],
+        });
+      },
+    });
+
+    map.addLayer(clusterGroup);
+    clusterGroupRef.current = clusterGroup;
+
+    return () => {
+      map.removeLayer(clusterGroup);
+    };
+  }, [map]);
+
+  useEffect(() => {
+    const clusterGroup = clusterGroupRef.current;
+    if (!clusterGroup) return;
+
+    clusterGroup.clearLayers();
+
+    const markers = stations.map((station) => {
+      const marker = L.marker([station.latitude, station.longitude], {
+        icon: createStationIcon(station, station.id === selectedStationId),
+      });
+      marker.on("click", () => onSelectStation(station));
+      return marker;
+    });
+
+    if (markers.length > 0) {
+      clusterGroup.addLayers(markers);
+    }
+  }, [stations, selectedStationId, onSelectStation]);
 
   return null;
 }
@@ -1474,6 +1550,11 @@ function StatusPill({ status }) {
 
 function createStationIcon(station, selected) {
   const providerProfile = getProviderProfile(station.provider);
+  const unknownProviderKey =
+    providerProfile.key === "unknown" ? `${station.providerLabel || station.provider}-${station.providerInitials || ""}` : "";
+  const key = `${providerProfile.key}-${unknownProviderKey}-${station.status}-${selected ? 1 : 0}`;
+  if (iconCache.has(key)) return iconCache.get(key);
+
   const className = [
     "pin",
     `pin-provider-${providerProfile.key}`,
@@ -1492,30 +1573,14 @@ function createStationIcon(station, selected) {
     `--provider-text: ${providerProfile.brandTextColor}`,
   ].join("; ");
 
-  return L.divIcon({
+  const icon = L.divIcon({
     className: "station-marker",
     html: `<span class="${className}" style="${inlineStyle}" title="${escapeAttribute(station.providerLabel || providerProfile.shortName)}">${markerContent}<span class="pin-status pin-status-${station.status}"></span></span>`,
     iconSize: selected ? [36, 36] : [28, 28],
     iconAnchor: selected ? [18, 18] : [14, 14],
   });
-}
-
-function createUserIcon() {
-  return L.divIcon({
-    className: "user-marker",
-    html: '<span class="user-pin"><span></span></span>',
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-  });
-}
-
-function createSearchPlaceIcon() {
-  return L.divIcon({
-    className: "search-place-marker",
-    html: '<span class="search-place-pin"><span></span></span>',
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
-  });
+  iconCache.set(key, icon);
+  return icon;
 }
 
 function getGoogleMapsUrl(station) {
