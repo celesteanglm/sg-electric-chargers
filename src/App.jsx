@@ -1296,22 +1296,6 @@ function ChargerMapPage({ onNavigate }) {
                   </div>
                 </div>
               ) : null}
-              {operatorFilters.length > 0 ? (
-                <div className="filter-section">
-                  <span className="filter-section-label">Operator</span>
-                  <div className="filter-section-chips">
-                    {operatorFilters.map((item) => (
-                      <OperatorFilterChip
-                        active={activeOperatorIds.has(item.id)}
-                        item={item}
-                        key={item.id}
-                        countLabel={selectedCountryConfig.availabilitySummaryLabel}
-                        onSelect={() => toggleOperatorFilter(item.id)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ) : null}
               {connectorTypeFilters.length > 0 ? (
                 <div className="filter-section">
                   <span className="filter-section-label">Connector</span>
@@ -1324,6 +1308,22 @@ function ChargerMapPage({ onNavigate }) {
                         item={item}
                         key={item.id}
                         onSelect={() => toggleConnectorTypeFilter(item.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {operatorFilters.length > 0 ? (
+                <div className="filter-section">
+                  <span className="filter-section-label">Operator</span>
+                  <div className="filter-section-chips">
+                    {operatorFilters.map((item) => (
+                      <OperatorFilterChip
+                        active={activeOperatorIds.has(item.id)}
+                        item={item}
+                        key={item.id}
+                        countLabel={selectedCountryConfig.availabilitySummaryLabel}
+                        onSelect={() => toggleOperatorFilter(item.id)}
                       />
                     ))}
                   </div>
