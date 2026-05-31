@@ -336,7 +336,7 @@ button {
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
 }
 
@@ -653,8 +653,7 @@ button {
   text-transform: uppercase;
 }
 
-.location-notice,
-.filter-context-notice {
+.location-notice {
   padding: 10px 12px;
   color: #405049;
   background: rgba(255, 255, 255, 0.93);
@@ -665,41 +664,6 @@ button {
   font-weight: 800;
   line-height: 1.35;
   backdrop-filter: blur(18px);
-}
-
-.filter-context-notice {
-  padding: 8px 10px;
-  color: #5d7068;
-  background: rgba(250, 253, 251, 0.76);
-  border-color: rgba(190, 216, 206, 0.68);
-  box-shadow: 0 5px 12px rgba(8, 40, 63, 0.06);
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.notice-dismiss {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  margin-top: -1px;
-  color: #6a7d74;
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-  opacity: 0.56;
-}
-
-.notice-dismiss:hover {
-  opacity: 1;
-  background: rgba(24, 191, 115, 0.15);
 }
 
 .station-marker {
@@ -847,6 +811,28 @@ button {
   border: 3px solid #ffffff;
   border-radius: 999px;
   box-shadow: 0 4px 14px rgba(242, 165, 26, 0.34);
+}
+
+/* Cluster marker styles */
+.cluster-marker {
+  background: transparent;
+  border: none;
+}
+
+.cluster-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: var(--ink);
+  color: #ffffff;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+  border: 3px solid #ffffff;
+  box-shadow: 0 3px 12px rgba(8, 40, 63, 0.35);
+  cursor: pointer;
 }
 
 .leaflet-popup-content-wrapper {
@@ -1731,22 +1717,29 @@ button {
 
   .bottom-sheet.sheet-collapsed {
     height: max(122px, calc(108px + env(safe-area-inset-bottom)));
+    padding-bottom: env(safe-area-inset-bottom);
+    touch-action: none;
   }
 
   .sheet-handle {
     display: grid;
     place-items: center;
     position: relative;
-    flex: 0 0 28px;
+    flex: 0 0 36px;
     width: 100%;
-    height: 28px;
+    height: 36px;
     margin: 0 0 2px;
     padding: 0;
     background: transparent;
     border: 0;
     border-radius: 8px;
-    cursor: pointer;
+    cursor: grab;
     touch-action: none;
+    user-select: none;
+  }
+
+  .sheet-handle:active {
+    cursor: grabbing;
   }
 
   .sheet-handle-bar {
@@ -1793,6 +1786,24 @@ button {
   .bottom-sheet.sheet-collapsed .station-list,
   .bottom-sheet.sheet-collapsed .station-list-footer {
     display: none;
+  }
+
+  /* Show hidden content while the sheet is being dragged open */
+  .bottom-sheet.is-dragging.sheet-collapsed .feed-warning {
+    display: block;
+  }
+
+  .bottom-sheet.is-dragging.sheet-collapsed .detail-card {
+    display: grid;
+  }
+
+  .bottom-sheet.is-dragging.sheet-collapsed .nearby-header,
+  .bottom-sheet.is-dragging.sheet-collapsed .station-list-footer {
+    display: flex;
+  }
+
+  .bottom-sheet.is-dragging.sheet-collapsed .station-list {
+    display: grid;
   }
 
   .summary-strip {

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import {
   ArrowLeft,
@@ -32,14 +34,18 @@ const CLIENT_REFRESH_MS = 5 * 60 * 1000;
 const SG_TIME_ZONE = "Asia/Singapore";
 const FEEDBACK_EMAIL = "celeste@agents.world";
 const SHEET_DRAG_THRESHOLD_PX = 44;
+const SHEET_CONTENT_DRAG_THRESHOLD_PX = 6;
+const SHEET_VELOCITY_SAMPLE_MS = 140;
+const SHEET_FLICK_VELOCITY_PX_PER_MS = 0.45;
+const SHEET_MIN_VELOCITY_DISTANCE_PX = 8;
 const MOBILE_SHEET_QUERY = "(max-width: 860px)";
 const RESULT_PAGE_SIZE = 10;
 const AREA_FILTERS = [
+  { id: "central", label: "Central", color: "#08a7d8", textColor: "#06283a" },
   { id: "north", label: "North", color: "#17875a", textColor: "#ffffff" },
   { id: "south", label: "South", color: "#0f4c81", textColor: "#ffffff" },
   { id: "east", label: "East", color: "#f97316", textColor: "#17201c" },
   { id: "west", label: "West", color: "#7c3aed", textColor: "#ffffff" },
-  { id: "central", label: "Central", color: "#08a7d8", textColor: "#06283a" },
 ];
 const ALL_FILTER = { id: "all", label: "All", Icon: CircleDot, color: "#08283f", textColor: "#ffffff" };
 const QUICK_FILTERS = [
@@ -53,6 +59,24 @@ const QUICK_FILTERS = [
   },
   { id: "fast", stateKey: "fastOnly", label: "Fast", Icon: PlugZap, color: "#08a7d8", textColor: "#06283a" },
 ];
+
+// Module-level icon cache keyed by the marker content that affects rendering.
+const iconCache = new Map();
+
+// Static icons that never change
+const USER_ICON = L.divIcon({
+  className: "user-marker",
+  html: '<span class="user-pin"><span></span></span>',
+  iconSize: [30, 30],
+  iconAnchor: [15, 15],
+});
+
+const SEARCH_PLACE_ICON = L.divIcon({
+  className: "search-place-marker",
+  html: '<span class="search-place-pin"><span></span></span>',
+  iconSize: [26, 26],
+  iconAnchor: [13, 13],
+});
 
 export default function App() {
   const [path, setPath] = useState(() => window.location.pathname);
@@ -105,6 +129,7 @@ function ChargerMapPage({ onNavigate }) {
   const [userLocationAccuracy, setUserLocationAccuracy] = useState(null);
   const [isLocating, setIsLocating] = useState(false);
   const [mapCenter, setMapCenter] = useState(SINGAPORE_CENTER);
+  const [mapBounds, setMapBounds] = useState(null);
   const [visibleResultCount, setVisibleResultCount] = useState(RESULT_PAGE_SIZE);
   const [locationNotice, setLocationNotice] = useState("");
   const [sheetMode, setSheetMode] = useState(getInitialSheetMode);
@@ -112,7 +137,13 @@ function ChargerMapPage({ onNavigate }) {
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const filterBarRef = useRef(null);
   const mapRef = useRef(null);
-  const sheetDragStartY = useRef(null);
+  const sheetRef = useRef(null);
+  const sheetContentRef = useRef(null);
+  const sheetDragState = useRef(null);
+  const sheetDragSamples = useRef([]);
+  const sheetDragWindowCleanup = useRef(null);
+  const pendingContentDrag = useRef(null);
+  const pendingContentDragCleanup = useRef(null);
   const sheetDidDrag = useRef(false);
   const locationWatchId = useRef(null);
   const searchCandidatesRef = useRef([]);
@@ -219,7 +250,68 @@ function ChargerMapPage({ onNavigate }) {
     return () => mediaQuery.removeEventListener("change", syncMobileDefaultSheet);
   }, [sheetHasUserInteracted]);
 
-  useEffect(() => () => stopLocationWatch(), []);
+  useEffect(
+    () => () => {
+      stopLocationWatch();
+      cleanupPendingContentDrag();
+      cancelSheetDrag();
+    },
+    [],
+  );
+
+  // On iOS Safari, dynamically setting touch-action is ignored — the browser
+  // reads it at gesture start, before our JS can update it. The only reliable
+  // way to prevent the browser from scrolling the content when we want to
+  // drag the sheet closed is a non-passive touchmove listener that calls
+  // preventDefault() for downward gestures when already at scroll top.
+  useEffect(() => {
+    const content = sheetContentRef.current;
+    if (!content) return;
+
+    let touchStartY = null;
+    let touchStartScrollTop = null;
+
+    function onTouchStart(e) {
+      if (sheetMode !== "expanded" || e.touches.length !== 1 || isInteractiveSheetTarget(e.target)) {
+        touchStartY = null;
+        touchStartScrollTop = null;
+        return;
+      }
+
+      touchStartY = e.touches[0].clientY;
+      touchStartScrollTop = content.scrollTop;
+    }
+
+    function onTouchMove(e) {
+      if (e.touches.length !== 1 || touchStartY === null || touchStartScrollTop === null || touchStartScrollTop > 1) {
+        return;
+      }
+
+      const delta = e.touches[0].clientY - touchStartY;
+      if (delta > 0) {
+        // Downward drag at scroll top: block browser scroll so pointer
+        // events can drive the sheet-drag gesture instead.
+        e.preventDefault();
+      }
+    }
+
+    function onTouchEnd() {
+      touchStartY = null;
+      touchStartScrollTop = null;
+    }
+
+    content.addEventListener("touchstart", onTouchStart, { passive: true });
+    content.addEventListener("touchmove", onTouchMove, { passive: false });
+    content.addEventListener("touchend", onTouchEnd, { passive: true });
+    content.addEventListener("touchcancel", onTouchEnd, { passive: true });
+
+    return () => {
+      content.removeEventListener("touchstart", onTouchStart);
+      content.removeEventListener("touchmove", onTouchMove);
+      content.removeEventListener("touchend", onTouchEnd);
+      content.removeEventListener("touchcancel", onTouchEnd);
+    };
+  }, [sheetMode]);
 
   const searchQuery = useMemo(() => buildSearchQuery(query), [query]);
   const textSearchMatches = useMemo(() => rankStationSearchMatches(stations, searchQuery), [stations, searchQuery]);
@@ -244,6 +336,15 @@ function ChargerMapPage({ onNavigate }) {
       ),
     [activeAreaIds, activeConnectorTypeIds, activeOperatorIds, searchCandidates, selectedFilters],
   );
+
+  // Viewport culling — only render markers visible on the map (with padding buffer)
+  const viewportStations = useMemo(() => {
+    if (!mapBounds) return filteredStations;
+    const paddedBounds = mapBounds.pad(0.2);
+    return filteredStations.filter((station) =>
+      paddedBounds.contains([station.latitude, station.longitude]),
+    );
+  }, [filteredStations, mapBounds]);
 
   useEffect(() => {
     searchCandidatesRef.current = searchCandidates;
@@ -438,6 +539,10 @@ function ChargerMapPage({ onNavigate }) {
     setMapCenter((current) => (isSameMapCenter(current, nextCenter) ? current : nextCenter));
   }, []);
 
+  const handleBoundsChange = useCallback((bounds) => {
+    setMapBounds(bounds);
+  }, []);
+
   function updateSelectedFilters(updater) {
     setSelectedFilters((current) => {
       const nextFilters = typeof updater === "function" ? updater(current) : updater;
@@ -446,7 +551,7 @@ function ChargerMapPage({ onNavigate }) {
     });
   }
 
-  function selectStation(station) {
+  const selectStation = useCallback((station) => {
     setSelectionMode("manual");
     setSelectedId(station.id);
     setSheetHasUserInteracted(true);
@@ -454,7 +559,7 @@ function ChargerMapPage({ onNavigate }) {
     mapRef.current?.flyTo([station.latitude, station.longitude], Math.max(mapRef.current.getZoom(), 14), {
       duration: 0.35,
     });
-  }
+  }, [mapRef]);
 
   function handleLocateMe() {
     if (isLocating) return;
@@ -558,72 +663,113 @@ function ChargerMapPage({ onNavigate }) {
     locationWatchId.current = null;
   }
 
-  function handleSheetPointerDown(event) {
-    if (event.button != null && event.button !== 0) return;
-
-    sheetDragStartY.current = event.clientY;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-
-    window.addEventListener(
-      "pointerup",
-      (pointerEvent) => {
-        if (pointerEvent.pointerId === event.pointerId) {
-          finishSheetDrag(pointerEvent.clientY);
-        }
-      },
-      { once: true },
-    );
+  function getSheetSnapHeights() {
+    return {
+      expandedHeight: Math.min(window.innerHeight * 0.68, 620),
+      collapsedHeight: Math.max(122, 108),
+    };
   }
 
-  function handleSheetPointerUp(event) {
-    if (sheetDragStartY.current == null) return;
+  function startSheetDrag(
+    event,
+    { source, startY = event.clientY, captureTarget = event.currentTarget, skipButtonCheck = false } = {},
+  ) {
+    if (!skipButtonCheck && event.button != null && event.button !== 0) return false;
+    if (event.pointerType === "touch" && !event.isPrimary) return false;
+    if (sheetDragState.current || !sheetRef.current) return false;
 
-    finishSheetDrag(event.clientY);
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    const startTime = performance.now();
+    sheetDragState.current = {
+      captureTarget,
+      pointerId: event.pointerId,
+      source,
+      startHeight: sheetRef.current.offsetHeight,
+      startTime,
+      startY,
+    };
+    sheetDragSamples.current = [{ time: startTime, y: startY }];
+    sheetDidDrag.current = false;
+
+    sheetRef.current.style.transition = "none";
+    sheetRef.current.classList.add("is-dragging");
+
+    setPointerCapture(captureTarget, event.pointerId);
+    attachSheetDragWindowListeners();
+    return true;
+  }
+
+  function moveSheetDrag(clientY) {
+    const drag = sheetDragState.current;
+    if (!drag || !sheetRef.current) return;
+
+    recordSheetDragSample(clientY);
+
+    const delta = drag.startY - clientY;
+    const { expandedHeight, collapsedHeight } = getSheetSnapHeights();
+    let newHeight = drag.startHeight + delta;
+
+    if (newHeight > expandedHeight) {
+      newHeight = expandedHeight + Math.log1p(newHeight - expandedHeight) * 5;
+    } else if (newHeight < collapsedHeight) {
+      newHeight = collapsedHeight - Math.log1p(collapsedHeight - newHeight) * 5;
     }
-  }
 
-  function handleSheetPointerCancel(event) {
-    sheetDragStartY.current = null;
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }
-
-  function handleSheetMouseDown(event) {
-    if (sheetDragStartY.current != null || event.button !== 0) return;
-
-    sheetDragStartY.current = event.clientY;
-
-    window.addEventListener(
-      "mouseup",
-      (mouseEvent) => {
-        finishSheetDrag(mouseEvent.clientY);
-      },
-      { once: true },
-    );
+    sheetRef.current.style.height = `${newHeight}px`;
   }
 
   function finishSheetDrag(endY) {
-    if (sheetDragStartY.current == null) return;
+    const drag = sheetDragState.current;
+    if (!drag) return;
 
-    const deltaY = endY - sheetDragStartY.current;
-    sheetDragStartY.current = null;
-    sheetDidDrag.current = Math.abs(deltaY) > SHEET_DRAG_THRESHOLD_PX;
+    const deltaY = endY - drag.startY;
+    const velocityY = getSheetDragVelocity(endY);
+    const draggedFar = Math.abs(deltaY) > SHEET_DRAG_THRESHOLD_PX;
+    const { expandedHeight, collapsedHeight } = getSheetSnapHeights();
+    const drawnHeight = drag.startHeight - deltaY;
 
-    if (sheetDidDrag.current) {
+    let newMode = null;
+    if (velocityY > SHEET_FLICK_VELOCITY_PX_PER_MS) {
+      newMode = "collapsed";
+    } else if (velocityY < -SHEET_FLICK_VELOCITY_PX_PER_MS) {
+      newMode = "expanded";
+    } else if (draggedFar) {
+      const midpoint = (expandedHeight + collapsedHeight) / 2;
+      newMode = drawnHeight > midpoint ? "expanded" : "collapsed";
+    }
+
+    cleanupSheetDrag();
+
+    if (newMode) {
+      sheetDidDrag.current = true;
       window.setTimeout(() => {
         sheetDidDrag.current = false;
       }, 400);
+
+      setSheetHasUserInteracted(true);
+      setSheetMode(newMode);
+    }
+  }
+
+  function cancelSheetDrag() {
+    cleanupSheetDrag();
+  }
+
+  function cleanupSheetDrag() {
+    const drag = sheetDragState.current;
+    removeSheetDragWindowListeners();
+    cleanupPendingContentDrag();
+
+    if (drag?.captureTarget) {
+      releasePointerCapture(drag.captureTarget, drag.pointerId);
     }
 
-    if (deltaY > SHEET_DRAG_THRESHOLD_PX) {
-      setSheetHasUserInteracted(true);
-      setSheetMode("collapsed");
-    } else if (deltaY < -SHEET_DRAG_THRESHOLD_PX) {
-      setSheetHasUserInteracted(true);
-      setSheetMode("expanded");
+    sheetDragState.current = null;
+    sheetDragSamples.current = [];
+
+    if (sheetRef.current) {
+      sheetRef.current.style.transition = "";
+      sheetRef.current.style.height = "";
+      sheetRef.current.classList.remove("is-dragging");
     }
   }
 
@@ -635,6 +781,182 @@ function ChargerMapPage({ onNavigate }) {
 
     setSheetHasUserInteracted(true);
     setSheetMode((current) => (current === "expanded" ? "collapsed" : "expanded"));
+  }
+
+  function handleSheetPointerDown(event) {
+    startSheetDrag(event, { source: "handle" });
+  }
+
+  function handleCollapsedSheetPointerDown(event) {
+    if (sheetMode !== "collapsed") return;
+    startSheetDrag(event, { source: "collapsed" });
+  }
+
+  function handleContentPointerDown(event) {
+    if (event.button != null && event.button !== 0) return;
+    if (sheetMode !== "expanded") return;
+    if (event.pointerType === "touch" && !event.isPrimary) {
+      cleanupPendingContentDrag();
+      cancelSheetDrag();
+      return;
+    }
+    if (sheetDragState.current || pendingContentDrag.current) return;
+    if (isInteractiveSheetTarget(event.target)) return;
+
+    const content = event.currentTarget;
+    if (content.scrollTop > 1) return;
+
+    pendingContentDrag.current = {
+      content,
+      pointerId: event.pointerId,
+      startY: event.clientY,
+    };
+    attachPendingContentDragListeners();
+  }
+
+  function handleSheetWindowPointerMove(event) {
+    const drag = sheetDragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    event.preventDefault();
+    moveSheetDrag(event.clientY);
+  }
+
+  function handleSheetWindowPointerUp(event) {
+    const drag = sheetDragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    finishSheetDrag(event.clientY);
+  }
+
+  function handleSheetWindowPointerCancel(event) {
+    const drag = sheetDragState.current;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    cancelSheetDrag();
+  }
+
+  function handlePendingContentPointerMove(event) {
+    const pending = pendingContentDrag.current;
+    if (!pending || event.pointerId !== pending.pointerId) return;
+
+    const deltaY = event.clientY - pending.startY;
+    if (deltaY < -SHEET_CONTENT_DRAG_THRESHOLD_PX || pending.content.scrollTop > 1) {
+      cleanupPendingContentDrag();
+      return;
+    }
+
+    if (deltaY <= SHEET_CONTENT_DRAG_THRESHOLD_PX) return;
+
+    const started = startSheetDrag(event, {
+      captureTarget: pending.content,
+      skipButtonCheck: true,
+      source: "content",
+      startY: pending.startY,
+    });
+    cleanupPendingContentDrag();
+
+    if (started) {
+      event.preventDefault();
+      moveSheetDrag(event.clientY);
+    }
+  }
+
+  function handlePendingContentPointerEnd(event) {
+    const pending = pendingContentDrag.current;
+    if (!pending || event.pointerId !== pending.pointerId) return;
+
+    cleanupPendingContentDrag();
+  }
+
+  function attachSheetDragWindowListeners() {
+    removeSheetDragWindowListeners();
+    const handleMove = handleSheetWindowPointerMove;
+    const handleUp = handleSheetWindowPointerUp;
+    const handleCancel = handleSheetWindowPointerCancel;
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleCancel);
+    sheetDragWindowCleanup.current = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleCancel);
+    };
+  }
+
+  function removeSheetDragWindowListeners() {
+    sheetDragWindowCleanup.current?.();
+    sheetDragWindowCleanup.current = null;
+  }
+
+  function attachPendingContentDragListeners() {
+    removePendingContentDragListeners();
+    const handleMove = handlePendingContentPointerMove;
+    const handleEnd = handlePendingContentPointerEnd;
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleEnd);
+    pendingContentDragCleanup.current = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleEnd);
+    };
+  }
+
+  function removePendingContentDragListeners() {
+    pendingContentDragCleanup.current?.();
+    pendingContentDragCleanup.current = null;
+  }
+
+  function cleanupPendingContentDrag() {
+    removePendingContentDragListeners();
+    pendingContentDrag.current = null;
+  }
+
+  function recordSheetDragSample(y) {
+    const now = performance.now();
+    const samples = [...sheetDragSamples.current, { time: now, y }].filter(
+      (sample) => now - sample.time <= SHEET_VELOCITY_SAMPLE_MS,
+    );
+    sheetDragSamples.current = samples;
+  }
+
+  function getSheetDragVelocity(endY) {
+    const now = performance.now();
+    const samples = [...sheetDragSamples.current, { time: now, y: endY }];
+    const anchor = samples.find((sample) => now - sample.time <= SHEET_VELOCITY_SAMPLE_MS && now > sample.time);
+    if (!anchor) return 0;
+
+    const elapsed = now - anchor.time;
+    const distance = endY - anchor.y;
+    if (elapsed <= 0 || Math.abs(distance) < SHEET_MIN_VELOCITY_DISTANCE_PX) return 0;
+
+    return distance / elapsed;
+  }
+
+  function setPointerCapture(target, pointerId) {
+    try {
+      target?.setPointerCapture?.(pointerId);
+    } catch {
+      // Capture can fail if the browser has already canceled the pointer.
+    }
+  }
+
+  function releasePointerCapture(target, pointerId) {
+    try {
+      if (target?.hasPointerCapture?.(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
+    } catch {
+      // Ignore stale pointer ids during cancellation.
+    }
+  }
+
+  function isInteractiveSheetTarget(target) {
+    return Boolean(
+      target instanceof Element &&
+        target.closest("a, button, input, select, textarea, [role='button'], [contenteditable='true']"),
+    );
   }
 
   const openConnectorCount = filteredStations.reduce((sum, station) => sum + station.availableCount, 0);
@@ -652,13 +974,6 @@ function ChargerMapPage({ onNavigate }) {
         ? placeSearchWarning
         : "";
   const topNotice = locationNotice || searchNotice;
-  const filterContextNotice = isDefaultCentralAvailabilityFilter(selectedFilters)
-    ? "Central + available filters are on. Add areas or clear filters to see more."
-    : "";
-
-  const [filterNoticeDismissed, setFilterNoticeDismissed] = useState(false);
-  useEffect(() => { setFilterNoticeDismissed(false); }, [filterContextNotice]);
-
   function clearFilters() {
     updateSelectedFilters(createAllFilterState());
   }
@@ -842,14 +1157,6 @@ function ChargerMapPage({ onNavigate }) {
           </div>
 
           {topNotice ? <div className="location-notice">{topNotice}</div> : null}
-          {filterContextNotice && !filterNoticeDismissed ? (
-            <div className="filter-context-notice">
-              {filterContextNotice}
-              <button type="button" className="notice-dismiss" onClick={() => setFilterNoticeDismissed(true)} aria-label="Dismiss">
-                <X size={14} />
-              </button>
-            </div>
-          ) : null}
         </div>
 
         <MapContainer
@@ -861,28 +1168,18 @@ function ChargerMapPage({ onNavigate }) {
           scrollWheelZoom
           className="charger-map"
         >
-          <MapBridge mapRef={mapRef} onCenterChange={handleMapCenterChange} />
+          <MapBridge mapRef={mapRef} onCenterChange={handleMapCenterChange} onBoundsChange={handleBoundsChange} />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          {filteredStations.map((station) => (
-            <Marker
-              key={station.id}
-              position={[station.latitude, station.longitude]}
-              icon={createStationIcon(station, station.id === selectedStation?.id)}
-              eventHandlers={{
-                click: () => selectStation(station),
-              }}
-            >
-              <Popup>
-                <strong>{station.name}</strong>
-                <span>{station.providerLabel || station.provider}</span>
-              </Popup>
-            </Marker>
-          ))}
+          <ClusterLayer
+            stations={viewportStations}
+            selectedStationId={selectedStation?.id}
+            onSelectStation={selectStation}
+          />
           {userLocation ? (
-            <Marker position={userLocation} icon={createUserIcon()} zIndexOffset={1000}>
+            <Marker position={userLocation} icon={USER_ICON} zIndexOffset={1000}>
               <Popup>
                 <strong>Your location</strong>
                 {formatAccuracyMeters(userLocationAccuracy) ? <span>Accuracy {formatAccuracyMeters(userLocationAccuracy)}</span> : null}
@@ -890,22 +1187,24 @@ function ChargerMapPage({ onNavigate }) {
             </Marker>
           ) : null}
           {searchPlace ? (
-            <Marker position={[searchPlace.latitude, searchPlace.longitude]} icon={createSearchPlaceIcon()}>
+            <Marker position={[searchPlace.latitude, searchPlace.longitude]} icon={SEARCH_PLACE_ICON}>
               <Popup>{searchPlace.label}</Popup>
             </Marker>
           ) : null}
         </MapContainer>
       </section>
 
-      <section className={`bottom-sheet sheet-${sheetMode}`} aria-label="Charger details and results">
+      <section
+        ref={sheetRef}
+        className={`bottom-sheet sheet-${sheetMode}`}
+        aria-label="Charger details and results"
+        onPointerDown={sheetMode === "collapsed" ? handleCollapsedSheetPointerDown : undefined}
+      >
         <button
           className="sheet-handle"
           type="button"
           onClick={toggleSheetMode}
           onPointerDown={handleSheetPointerDown}
-          onPointerUp={handleSheetPointerUp}
-          onPointerCancel={handleSheetPointerCancel}
-          onMouseDown={handleSheetMouseDown}
           aria-expanded={sheetMode === "expanded"}
           aria-label={sheetMode === "expanded" ? "Collapse charger details" : "Expand charger details"}
         >
@@ -913,7 +1212,7 @@ function ChargerMapPage({ onNavigate }) {
           {sheetMode === "collapsed" ? <ChevronsUp className="sheet-swipe-cue" size={18} aria-hidden="true" /> : null}
         </button>
 
-        <div className="sheet-content">
+        <div ref={sheetContentRef} className="sheet-content" onPointerDown={handleContentPointerDown}>
           <div className="panel-kicker">
             <span>
               <PlugZap size={15} aria-hidden="true" />
@@ -1141,7 +1440,7 @@ function getInitialSheetMode() {
   return window.matchMedia(MOBILE_SHEET_QUERY).matches ? "collapsed" : "expanded";
 }
 
-function MapBridge({ mapRef, onCenterChange }) {
+function MapBridge({ mapRef, onCenterChange, onBoundsChange }) {
   const map = useMap();
 
   useEffect(() => {
@@ -1149,18 +1448,70 @@ function MapBridge({ mapRef, onCenterChange }) {
   }, [map, mapRef]);
 
   useEffect(() => {
-    function syncCenter() {
+    function syncState() {
       const center = map.getCenter();
       onCenterChange([center.lat, center.lng]);
+      onBoundsChange(map.getBounds());
     }
 
-    syncCenter();
-    map.on("moveend zoomend", syncCenter);
+    syncState();
+    map.on("moveend zoomend", syncState);
 
     return () => {
-      map.off("moveend zoomend", syncCenter);
+      map.off("moveend zoomend", syncState);
     };
-  }, [map, onCenterChange]);
+  }, [map, onCenterChange, onBoundsChange]);
+
+  return null;
+}
+
+function ClusterLayer({ stations, selectedStationId, onSelectStation }) {
+  const map = useMap();
+  const clusterGroupRef = useRef(null);
+
+  useEffect(() => {
+    const clusterGroup = L.markerClusterGroup({
+      disableClusteringAtZoom: 14,
+      spiderfyOnMaxZoom: false,
+      spiderifyOnMaxZoom: false,
+      maxClusterRadius: 60,
+      iconCreateFunction(cluster) {
+        const count = cluster.getChildCount();
+        return L.divIcon({
+          className: "cluster-marker",
+          html: `<span class="cluster-pin">${count}</span>`,
+          iconSize: [40, 40],
+          iconAnchor: [20, 20],
+        });
+      },
+    });
+
+    map.addLayer(clusterGroup);
+    clusterGroupRef.current = clusterGroup;
+
+    return () => {
+      map.removeLayer(clusterGroup);
+    };
+  }, [map]);
+
+  useEffect(() => {
+    const clusterGroup = clusterGroupRef.current;
+    if (!clusterGroup) return;
+
+    clusterGroup.clearLayers();
+
+    const markers = stations.map((station) => {
+      const marker = L.marker([station.latitude, station.longitude], {
+        icon: createStationIcon(station, station.id === selectedStationId),
+      });
+      marker.on("click", () => onSelectStation(station));
+      return marker;
+    });
+
+    if (markers.length > 0) {
+      clusterGroup.addLayers(markers);
+    }
+  }, [stations, selectedStationId, onSelectStation]);
 
   return null;
 }
@@ -1377,6 +1728,11 @@ function StatusPill({ status }) {
 
 function createStationIcon(station, selected) {
   const providerProfile = getProviderProfile(station.provider);
+  const unknownProviderKey =
+    providerProfile.key === "unknown" ? `${station.providerLabel || station.provider}-${station.providerInitials || ""}` : "";
+  const key = `${providerProfile.key}-${unknownProviderKey}-${station.status}-${selected ? 1 : 0}`;
+  if (iconCache.has(key)) return iconCache.get(key);
+
   const className = [
     "pin",
     `pin-provider-${providerProfile.key}`,
@@ -1395,30 +1751,14 @@ function createStationIcon(station, selected) {
     `--provider-text: ${providerProfile.brandTextColor}`,
   ].join("; ");
 
-  return L.divIcon({
+  const icon = L.divIcon({
     className: "station-marker",
     html: `<span class="${className}" style="${inlineStyle}" title="${escapeAttribute(station.providerLabel || providerProfile.shortName)}">${markerContent}<span class="pin-status pin-status-${station.status}"></span></span>`,
     iconSize: selected ? [36, 36] : [28, 28],
     iconAnchor: selected ? [18, 18] : [14, 14],
   });
-}
-
-function createUserIcon() {
-  return L.divIcon({
-    className: "user-marker",
-    html: '<span class="user-pin"><span></span></span>',
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-  });
-}
-
-function createSearchPlaceIcon() {
-  return L.divIcon({
-    className: "search-place-marker",
-    html: '<span class="search-place-pin"><span></span></span>',
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
-  });
+  iconCache.set(key, icon);
+  return icon;
 }
 
 function getGoogleMapsUrl(station) {
@@ -1471,7 +1811,7 @@ function createDefaultFilterState() {
   return {
     availableOnly: true,
     fastOnly: false,
-    areas: ["central"],
+    areas: [],
     operators: [],
     connectorTypes: [],
   };
@@ -1503,17 +1843,6 @@ function hasActiveFilters(filters) {
       filters.areas.length > 0 ||
       filters.operators.length > 0 ||
       filters.connectorTypes.length > 0,
-  );
-}
-
-function isDefaultCentralAvailabilityFilter(filters) {
-  return (
-    filters.availableOnly &&
-    !filters.fastOnly &&
-    filters.areas.length === 1 &&
-    filters.areas[0] === "central" &&
-    filters.operators.length === 0 &&
-    filters.connectorTypes.length === 0
   );
 }
 
