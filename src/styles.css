@@ -508,6 +508,12 @@ button {
   font-weight: 900;
 }
 
+.price-input small {
+  color: #7a6940;
+  font-size: 10px;
+  font-weight: 900;
+}
+
 .price-input input {
   width: 132px;
   height: 34px;
@@ -519,6 +525,12 @@ button {
   outline: 0;
   font-size: 14px;
   font-weight: 900;
+}
+
+.price-input input:disabled {
+  color: var(--muted);
+  background: #edf2f0;
+  cursor: not-allowed;
 }
 
 .price-input input:focus {

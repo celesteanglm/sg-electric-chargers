@@ -203,6 +203,9 @@ function ChargerMapPage({ onNavigate }) {
   const activeAreaIds = useMemo(() => new Set(selectedFilters.areas), [selectedFilters.areas]);
   const activeOperatorIds = useMemo(() => new Set(selectedFilters.operators), [selectedFilters.operators]);
   const activeConnectorTypeIds = useMemo(() => new Set(selectedFilters.connectorTypes), [selectedFilters.connectorTypes]);
+  const priceStats = useMemo(() => buildPriceStats(stations), [stations]);
+  const priceCurrencyPrefix = selectedCountry === "my" ? "RM" : "S$";
+  const hasKnownPrices = priceStats.max != null;
   const priceFilterCount = (selectedFilters.maxPriceKwh ? 1 : 0) + (selectedFilters.includeUnknownPrices ? 0 : 1);
   const extendedFilterCount =
     selectedFilters.areas.length + selectedFilters.operators.length + selectedFilters.connectorTypes.length + priceFilterCount;
@@ -1332,14 +1335,20 @@ function ChargerMapPage({ onNavigate }) {
                 <span className="filter-section-label">Price</span>
                 <div className="price-filter-row">
                   <label className="price-input">
-                    <span>Max {selectedCountry === "sg" ? "S$" : "RM"}/kWh</span>
+                    <span>{hasKnownPrices ? `Max ${priceCurrencyPrefix}/kWh` : `${priceCurrencyPrefix}/kWh unavailable`}</span>
+                    <small>
+                      {hasKnownPrices
+                        ? `Current max ${priceCurrencyPrefix}${formatPriceAmount(priceStats.max)}/kWh`
+                        : "No current price data"}
+                    </small>
                     <input
                       type="number"
                       min="0"
                       step="0.01"
                       value={selectedFilters.maxPriceKwh}
                       onChange={handleMaxPriceChange}
-                      placeholder="Any"
+                      placeholder={hasKnownPrices ? formatPriceAmount(priceStats.max) : "No data"}
+                      disabled={!hasKnownPrices}
                     />
                   </label>
                   <label className="unknown-price-toggle">
@@ -1352,7 +1361,7 @@ function ChargerMapPage({ onNavigate }) {
                   </label>
                 </div>
                 {selectedCountry === "my" ? (
-                  <p className="filter-note">MEVnet does not publish tariff fields, so Malaysia prices are currently unknown.</p>
+                  <p className="filter-note">MEVnet does not publish tariff fields, so no current max RM/kWh can be shown.</p>
                 ) : null}
               </div>
             </div>
@@ -2153,6 +2162,21 @@ function stationPassesPriceFilter(station, selectedFilters) {
   if (!hasMaxPrice) return true;
 
   return price <= maxPrice;
+}
+
+function buildPriceStats(stations) {
+  const prices = stations.map(getStationPriceKwh).filter((price) => price != null);
+
+  return {
+    knownCount: prices.length,
+    min: prices.length > 0 ? Math.min(...prices) : null,
+    max: prices.length > 0 ? Math.max(...prices) : null,
+  };
+}
+
+function formatPriceAmount(value) {
+  if (!Number.isFinite(value)) return "";
+  return value.toFixed(2);
 }
 
 function formatStationAvailability(station) {

@@ -38,7 +38,7 @@ The Malaysia data source is PLANMalaysia's public MEVnet ArcGIS FeatureServer:
 https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/MEVnet_EVCB/FeatureServer/0
 ```
 
-MEVnet publishes public existing and proposed charging bay locations, state and local authority fields, AC/DC counts, indoor/outdoor fields, and provider-network counts. MEVnet does not publish real-time plug availability or tariff fields. The app caches MEVnet server-side for **7 days** by default using `MEVNET_CACHE_TTL_MS`; MEVnet describes its source updates as monthly/manual and subject to data availability.
+MEVnet publishes public existing and proposed charging bay locations, state and local authority fields, AC/DC counts, indoor/outdoor fields, and provider-network counts. MEVnet does not publish real-time plug availability or tariff fields. The current MEVnet network fields do not expose Tesla as a distinct provider; if Tesla chargers exist in the source, they are not distinguishable from the published provider fields. The app caches MEVnet server-side for **7 days** by default using `MEVNET_CACHE_TTL_MS`; MEVnet describes its source updates as monthly/manual and subject to data availability.
 
 Use the country query parameter to request a specific source:
 
