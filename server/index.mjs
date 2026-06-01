@@ -3,7 +3,13 @@ import express from "express";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractLtaBatchLink, normalizeChargerStations } from "../src/lib/chargers.js";
+import {
+  extractLtaBatchLink,
+  formatMevnetDataDate,
+  normalizeChargerStations,
+  normalizeMevnetStations,
+  parseMevnetDataDate,
+} from "../src/lib/chargers.js";
 import { normalizeSearchText } from "../src/lib/search.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -12,12 +18,27 @@ const distDir = path.join(rootDir, "dist");
 const samplePath = path.join(rootDir, "public", "data", "sample-chargers.json");
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || "0.0.0.0";
+const defaultCountry = "sg";
+const supportedCountries = new Set(["sg", "my"]);
 const ltaAccountKey = process.env.LTA_ACCOUNT_KEY;
 const configuredCacheTtlMs = Number(process.env.CACHE_TTL_MS || 5 * 60 * 1000);
 const cacheTtlMs = Number.isFinite(configuredCacheTtlMs) && configuredCacheTtlMs > 0 ? configuredCacheTtlMs : 5 * 60 * 1000;
 const configuredLtaFetchTimeoutMs = Number(process.env.LTA_FETCH_TIMEOUT_MS || 15000);
 const ltaFetchTimeoutMs =
   Number.isFinite(configuredLtaFetchTimeoutMs) && configuredLtaFetchTimeoutMs > 0 ? configuredLtaFetchTimeoutMs : 15000;
+const mevnetFeatureLayerUrl =
+  process.env.MEVNET_FEATURE_LAYER_URL ||
+  "https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/MEVnet_EVCB/FeatureServer/0";
+const configuredMevnetCacheTtlMs = Number(process.env.MEVNET_CACHE_TTL_MS || 7 * 24 * 60 * 60 * 1000);
+const mevnetCacheTtlMs =
+  Number.isFinite(configuredMevnetCacheTtlMs) && configuredMevnetCacheTtlMs > 0
+    ? configuredMevnetCacheTtlMs
+    : 7 * 24 * 60 * 60 * 1000;
+const configuredMevnetFetchTimeoutMs = Number(process.env.MEVNET_FETCH_TIMEOUT_MS || ltaFetchTimeoutMs);
+const mevnetFetchTimeoutMs =
+  Number.isFinite(configuredMevnetFetchTimeoutMs) && configuredMevnetFetchTimeoutMs > 0
+    ? configuredMevnetFetchTimeoutMs
+    : ltaFetchTimeoutMs;
 const oneMapBaseUrl = process.env.ONEMAP_BASE_URL || "https://www.onemap.gov.sg";
 const oneMapApiToken = process.env.ONEMAP_API_TOKEN || "";
 const oneMapEmail = process.env.ONEMAP_EMAIL || "";
@@ -31,6 +52,8 @@ const oneMapSearchCacheTtlMs =
 
 let liveCache = null;
 let liveRefreshPromise = null;
+let mevnetCache = null;
+let mevnetRefreshPromise = null;
 let sampleCache = null;
 let alignedRefreshTimer = null;
 let oneMapTokenCache = null;
@@ -68,6 +91,16 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     ltaConfigured: Boolean(ltaAccountKey),
     cache: liveCache ? buildCacheMeta(liveCache.fetchedAtMs) : null,
+    countries: {
+      sg: {
+        configured: Boolean(ltaAccountKey),
+        cache: liveCache ? buildCacheMeta(liveCache.fetchedAtMs) : null,
+      },
+      my: {
+        configured: true,
+        cache: mevnetCache ? buildMevnetCacheMeta(mevnetCache.fetchedAtMs) : null,
+      },
+    },
   });
 });
 
@@ -80,9 +113,10 @@ app.get("/api/config", (_req, res) => {
   });
 });
 
-app.get("/api/chargers", async (_req, res) => {
-  const payload = await getChargersPayload();
-  const maxAgeSeconds = getSecondsUntilNextRefreshBoundary();
+app.get("/api/chargers", async (req, res) => {
+  const country = normalizeCountry(req.query.country);
+  const payload = await getChargersPayload(country);
+  const maxAgeSeconds = getChargerHttpMaxAgeSeconds(country, payload);
 
   res.set("Cache-Control", `public, max-age=${maxAgeSeconds}, stale-while-revalidate=60`);
   res.json(payload);
@@ -143,7 +177,12 @@ async function readSampleData() {
   return sampleCache;
 }
 
-async function getChargersPayload() {
+async function getChargersPayload(country = defaultCountry) {
+  if (country === "my") return getMalaysiaChargersPayload();
+  return getSingaporeChargersPayload();
+}
+
+async function getSingaporeChargersPayload() {
   if (!ltaAccountKey) {
     return buildSamplePayload("Add LTA_ACCOUNT_KEY to use the live DataMall EV Charging Points Batch feed.", false);
   }
@@ -164,6 +203,26 @@ async function getChargersPayload() {
     }
 
     return buildSamplePayload(warning, true);
+  }
+}
+
+async function getMalaysiaChargersPayload() {
+  if (mevnetCache && mevnetCache.expiresAtMs > Date.now()) {
+    return buildMevnetPayload(mevnetCache, "fresh");
+  }
+
+  try {
+    const refreshedCache = await ensureMevnetCache();
+    return buildMevnetPayload(refreshedCache, "refreshed");
+  } catch (error) {
+    const warning = error instanceof Error ? error.message : "Unable to load MEVnet charger feed.";
+    console.warn(`MEVnet refresh failed: ${warning}`);
+
+    if (mevnetCache) {
+      return buildMevnetPayload(mevnetCache, "stale", warning);
+    }
+
+    return buildMevnetUnavailablePayload(warning);
   }
 }
 
@@ -224,6 +283,81 @@ async function ensureLiveCacheForCurrentSlot() {
   }
 
   return liveRefreshPromise;
+}
+
+async function refreshMevnetCache() {
+  const features = [];
+  const pageSize = 1000;
+  let resultOffset = 0;
+
+  while (true) {
+    const page = await fetchMevnetPage(resultOffset, pageSize);
+    const pageFeatures = toArray(page.features);
+    features.push(...pageFeatures);
+
+    if (pageFeatures.length < pageSize || !page.exceededTransferLimit) break;
+    resultOffset += pageFeatures.length;
+  }
+
+  const stations = normalizeMevnetStations(features);
+  const fetchedAtMs = Date.now();
+  const sourceDates = stations.map((station) => parseMevnetDataDate(station.sourceDataDate)).filter(Boolean);
+  const latestSourceDate = sourceDates.length > 0 ? new Date(Math.max(...sourceDates.map((date) => date.getTime()))) : null;
+
+  mevnetCache = {
+    fetchedAtMs,
+    expiresAtMs: fetchedAtMs + mevnetCacheTtlMs,
+    sourceUpdatedAt: latestSourceDate ? latestSourceDate.toISOString() : "",
+    sourceUpdatedLabel: latestSourceDate ? formatMevnetDataDate(latestSourceDate) : "",
+    stations,
+  };
+
+  return mevnetCache;
+}
+
+async function fetchMevnetPage(resultOffset, resultRecordCount) {
+  const url = new URL(`${mevnetFeatureLayerUrl.replace(/\/$/, "")}/query`);
+  url.searchParams.set("f", "json");
+  url.searchParams.set("where", "1=1");
+  url.searchParams.set("outFields", "*");
+  url.searchParams.set("returnGeometry", "false");
+  url.searchParams.set("orderByFields", "objectid ASC");
+  url.searchParams.set("resultOffset", String(resultOffset));
+  url.searchParams.set("resultRecordCount", String(resultRecordCount));
+
+  const response = await fetch(url, {
+    headers: {
+      accept: "application/json",
+      referer: "https://portaldev.planmalaysia.gov.my/",
+      "user-agent": "Mozilla/5.0",
+    },
+    signal: AbortSignal.timeout(mevnetFetchTimeoutMs),
+  });
+
+  if (!response.ok) {
+    throw new Error(`MEVnet FeatureServer returned ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (payload.error) {
+    throw new Error(payload.error.message || "MEVnet FeatureServer returned an error.");
+  }
+
+  return payload;
+}
+
+async function ensureMevnetCache() {
+  if (mevnetCache && mevnetCache.expiresAtMs > Date.now()) {
+    return mevnetCache;
+  }
+
+  if (!mevnetRefreshPromise) {
+    mevnetRefreshPromise = refreshMevnetCache().finally(() => {
+      mevnetRefreshPromise = null;
+    });
+  }
+
+  return mevnetRefreshPromise;
 }
 
 async function searchOneMapPlace(query) {
@@ -388,11 +522,16 @@ function buildLivePayload(cache, cacheStatus, warning = "") {
 
   return {
     stations: cache.stations,
+    country: "sg",
     source: "lta-datamall",
     sourceLabel: "Live LTA DataMall",
     ltaConfigured: true,
     updatedAt: cache.ltaUpdatedAt || "",
     lastUpdatedTime: cache.ltaLastUpdatedTime || "",
+    refreshIntervalMs: cacheTtlMs,
+    refreshCadenceLabel: "Every 5 min",
+    supportsLiveAvailability: true,
+    priceCurrency: "SGD",
     count: cache.stations.length,
     warning,
     cache: cacheMeta,
@@ -404,15 +543,68 @@ async function buildSamplePayload(warning, ltaConfigured) {
 
   return {
     ...sample,
+    country: "sg",
     source: "sample",
     sourceLabel: "Sample fallback",
     ltaConfigured,
     updatedAt: normalizeLtaTimestamp(sample.lastUpdatedTime) || sample.lastUpdatedTime || "",
+    refreshIntervalMs: cacheTtlMs,
+    refreshCadenceLabel: "Every 5 min when live LTA is configured",
+    supportsLiveAvailability: true,
+    priceCurrency: "SGD",
     warning,
     cache: {
       status: "sample",
       ttlSeconds: Math.round(cacheTtlMs / 1000),
       refreshedAt: sample.generatedAt,
+      expiresAt: null,
+      ageSeconds: null,
+    },
+  };
+}
+
+function buildMevnetPayload(cache, cacheStatus, warning = "") {
+  return {
+    stations: cache.stations,
+    country: "my",
+    source: "mevnet",
+    sourceLabel: "PLANMalaysia MEVnet",
+    ltaConfigured: Boolean(ltaAccountKey),
+    updatedAt: cache.sourceUpdatedAt || "",
+    updatedAtLabel: cache.sourceUpdatedLabel || "TBC",
+    lastUpdatedTime: cache.sourceUpdatedLabel || "",
+    refreshIntervalMs: mevnetCacheTtlMs,
+    refreshCadenceLabel: "Weekly app cache; MEVnet source is monthly/manual",
+    supportsLiveAvailability: false,
+    priceCurrency: "MYR",
+    count: cache.stations.length,
+    warning,
+    cache: buildMevnetCacheMeta(cache.fetchedAtMs, cacheStatus),
+  };
+}
+
+function buildMevnetUnavailablePayload(warning) {
+  const fetchedAtMs = Date.now();
+
+  return {
+    stations: [],
+    country: "my",
+    source: "mevnet",
+    sourceLabel: "PLANMalaysia MEVnet",
+    ltaConfigured: Boolean(ltaAccountKey),
+    updatedAt: "",
+    updatedAtLabel: "TBC",
+    lastUpdatedTime: "",
+    refreshIntervalMs: mevnetCacheTtlMs,
+    refreshCadenceLabel: "Weekly app cache; MEVnet source is monthly/manual",
+    supportsLiveAvailability: false,
+    priceCurrency: "MYR",
+    count: 0,
+    warning,
+    cache: {
+      status: "unavailable",
+      ttlSeconds: Math.round(mevnetCacheTtlMs / 1000),
+      refreshedAt: new Date(fetchedAtMs).toISOString(),
       expiresAt: null,
       ageSeconds: null,
     },
@@ -425,6 +617,18 @@ function buildCacheMeta(fetchedAtMs, status = "fresh") {
   return {
     status,
     ttlSeconds: Math.max(0, Math.round((expiresAtMs - fetchedAtMs) / 1000)),
+    refreshedAt: new Date(fetchedAtMs).toISOString(),
+    expiresAt: new Date(expiresAtMs).toISOString(),
+    ageSeconds: Math.max(0, Math.round((Date.now() - fetchedAtMs) / 1000)),
+  };
+}
+
+function buildMevnetCacheMeta(fetchedAtMs, status = "fresh") {
+  const expiresAtMs = fetchedAtMs + mevnetCacheTtlMs;
+
+  return {
+    status,
+    ttlSeconds: Math.max(0, Math.round((expiresAtMs - Date.now()) / 1000)),
     refreshedAt: new Date(fetchedAtMs).toISOString(),
     expiresAt: new Date(expiresAtMs).toISOString(),
     ageSeconds: Math.max(0, Math.round((Date.now() - fetchedAtMs) / 1000)),
@@ -448,6 +652,19 @@ function normalizeLtaTimestamp(value) {
 
 function normalizePublicEnvValue(value) {
   return String(value || "").trim();
+}
+
+function normalizeCountry(value) {
+  const country = String(value || defaultCountry).trim().toLowerCase();
+  return supportedCountries.has(country) ? country : defaultCountry;
+}
+
+function getChargerHttpMaxAgeSeconds(country, payload) {
+  if (country === "my") {
+    return Math.max(60, Math.min(3600, payload.cache?.ttlSeconds || Math.round(mevnetCacheTtlMs / 1000)));
+  }
+
+  return getSecondsUntilNextRefreshBoundary();
 }
 
 function getCurrentRefreshSlotMs(nowMs = Date.now()) {

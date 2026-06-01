@@ -1,7 +1,7 @@
 {
   "name": "sg-electric-chargers",
   "version": "1.0.0",
-  "description": "BoCharge is a mobile-friendly Singapore EV charger map backed by LTA DataMall.",
+  "description": "BoCharge is a mobile-friendly Singapore and Malaysia EV charger map backed by LTA DataMall and MEVnet.",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n api,web -c cyan,green \"node --watch server/index.mjs\" \"vite --host 127.0.0.1\"",
