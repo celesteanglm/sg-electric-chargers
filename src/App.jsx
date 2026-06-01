@@ -1228,6 +1228,21 @@ function ChargerMapPage({ onNavigate }) {
             ) : null}
           </label>
 
+          <div className="country-toggle prominent-country-toggle" aria-label="Country filter">
+            {COUNTRY_OPTIONS.map((country) => (
+              <button
+                className={selectedCountry === country.id ? "country-toggle-button active" : "country-toggle-button"}
+                type="button"
+                key={country.id}
+                onClick={() => handleCountryChange(country.id)}
+                aria-pressed={selectedCountry === country.id}
+              >
+                <span className="country-flag" aria-hidden="true">{country.flag}</span>
+                {country.label}
+              </button>
+            ))}
+          </div>
+
           <div ref={filterBarRef}>
           <div className="filter-bar" aria-label="Charger filters">
             <div className="filter-quick-chips">
@@ -1264,23 +1279,6 @@ function ChargerMapPage({ onNavigate }) {
 
           {filterPanelOpen ? (
             <div className="filter-panel" aria-label="Extended filters">
-              <div className="filter-section">
-                <span className="filter-section-label">Country</span>
-                <div className="country-toggle" aria-label="Country filter">
-                  {COUNTRY_OPTIONS.map((country) => (
-                    <button
-                      className={selectedCountry === country.id ? "country-toggle-button active" : "country-toggle-button"}
-                      type="button"
-                      key={country.id}
-                      onClick={() => handleCountryChange(country.id)}
-                      aria-pressed={selectedCountry === country.id}
-                    >
-                      <span className="country-flag" aria-hidden="true">{country.flag}</span>
-                      {country.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
               {areaFilters.length > 0 ? (
                 <div className="filter-section">
                   <span className="filter-section-label">{selectedCountryConfig.areaLabel}</span>
