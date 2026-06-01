@@ -1,6 +1,35 @@
 import { getProviderKey } from "../data/providerApps.js";
 
 const LTA_BATCH_DOWNLOAD_HOSTS = new Set(["dmprod-datasets.s3.ap-southeast-1.amazonaws.com"]);
+const MEVNET_PROVIDER_FIELDS = [
+  ["number_of_ev_charger_by_network", "1Utama"],
+  ["number_of_ev_charger_by_netwo_1", "ABB"],
+  ["number_of_ev_charger_by_netwo_2", "BMW"],
+  ["number_of_ev_charger_by_netwo_3", "ChargeNGo"],
+  ["number_of_ev_charger_by_netwo_4", "chargEV"],
+  ["number_of_ev_charger_by_netwo_5", "ChargeSini"],
+  ["number_of_ev_charger_by_netwo_6", "ETCM"],
+  ["number_of_ev_charger_by_netwo_7", "Evwave"],
+  ["number_of_ev_charger_by_netwo_8", "Exicom"],
+  ["number_of_ev_charger_by_netwo_9", "Flexi Parking"],
+  ["number_of_ev_charger_by_netw_10", "Gentari"],
+  ["number_of_ev_charger_by_netw_11", "GoCar"],
+  ["number_of_ev_charger_by_netw_12", "GoToU"],
+  ["number_of_ev_charger_by_netw_13", "Jomcharge"],
+  ["number_of_ev_charger_by_netw_14", "Kineta"],
+  ["number_of_ev_charger_by_netw_15", "Mini"],
+  ["number_of_ev_charger_by_netw_16", "Nichicon"],
+  ["number_of_ev_charger_by_netw_17", "ParkEasy"],
+  ["number_of_ev_charger_by_netw_18", "PEKEMA"],
+  ["number_of_ev_charger_by_netw_19", "Pestech"],
+  ["number_of_ev_charger_by_netw_20", "Plugit"],
+  ["number_of_ev_charger_by_netw_21", "Schneider"],
+  ["number_of_ev_charger_by_netw_22", "ShellRecharge"],
+  ["number_of_ev_charger_by_netw_23", "Sunway"],
+  ["number_of_ev_charger_by_netw_24", "TNBX (GoToU)"],
+  ["number_of_ev_charger_by_netw_25", "Zap"],
+  ["number_of_ev_charger_by_netw_26", "Others"],
+];
 
 export function extractLtaBatchLink(payload) {
   if (!payload || typeof payload !== "object") return "";
@@ -33,6 +62,71 @@ export function normalizeChargerStations(payload) {
     });
 }
 
+export function normalizeMevnetStations(payload) {
+  const records = extractMevnetRecords(payload);
+
+  return records
+    .map((record, index) => normalizeMevnetRecord(record, index))
+    .filter((station) => Number.isFinite(station.latitude) && Number.isFinite(station.longitude))
+    .sort((a, b) => {
+      if (a.lifecycleStatus !== b.lifecycleStatus) return lifecycleRank(a.lifecycleStatus) - lifecycleRank(b.lifecycleStatus);
+      return a.name.localeCompare(b.name);
+    });
+}
+
+export function getStationPriceKwh(station) {
+  const prices = toArray(station?.plugTypes)
+    .filter((plug) => /kwh/i.test(cleanString(plug.priceType)))
+    .map((plug) => Number.parseFloat(plug.price))
+    .filter((price) => Number.isFinite(price) && price >= 0);
+
+  return prices.length > 0 ? Math.min(...prices) : null;
+}
+
+export function parseMevnetDataDate(value) {
+  if (typeof value !== "string") return null;
+
+  const match = cleanString(value).match(/^(\d{1,2})-([a-z]{3})-(\d{2}|\d{4})$/i);
+  if (!match) return null;
+
+  const [, dayText, monthText, yearText] = match;
+  const monthIndex = {
+    jan: 0,
+    feb: 1,
+    mar: 2,
+    apr: 3,
+    may: 4,
+    jun: 5,
+    jul: 6,
+    aug: 7,
+    sep: 8,
+    oct: 9,
+    nov: 10,
+    dec: 11,
+  }[monthText.toLowerCase()];
+
+  if (monthIndex == null) return null;
+
+  const day = Number(dayText);
+  const rawYear = Number(yearText);
+  const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+  const date = new Date(Date.UTC(year, monthIndex, day));
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+export function formatMevnetDataDate(value) {
+  const date = value instanceof Date ? value : parseMevnetDataDate(value);
+  if (!date || Number.isNaN(date.getTime())) return "";
+
+  return new Intl.DateTimeFormat("en-SG", {
+    timeZone: "Asia/Singapore",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
 export function stationSearchText(station) {
   return [
     station.name,
@@ -41,6 +135,10 @@ export function stationSearchText(station) {
     toArray(station.providers).join(" "),
     station.providerLabel,
     station.postalCode,
+    station.state,
+    station.pbt,
+    station.category,
+    station.availabilityLabel,
     station.plugTypes.map((plug) => plug.plugType).join(" "),
   ]
     .join(" ")
@@ -69,9 +167,11 @@ function normalizeStationRecord(record, index) {
   );
   const name = cleanString(record.name || record.Name || record.address || record.Address || `Charging area ${index + 1}`);
   const address = cleanString(record.address || record.Address || name);
+  const priceKwh = getPriceKwh(plugTypes);
 
   return {
     id: cleanString(record.locationId || record.LocationId || record.id || record.Id || `${latitude}-${longitude}-${index}`),
+    country: "sg",
     name,
     address,
     postalCode: cleanString(record.postalCode || record.PostalCode || extractPostalCode(address)),
@@ -96,8 +196,76 @@ function normalizeStationRecord(record, index) {
     ),
     position: cleanString(record.position || record.Position || chargingPoints[0]?.position || chargingPoints[0]?.Position || ""),
     maxPowerKw: maxPower(plugTypes),
+    priceKnown: priceKwh != null,
+    minPriceKwh: priceKwh,
+    priceCurrency: "SGD",
     plugTypes,
     chargers: chargingPoints.map(normalizeChargingPoint),
+  };
+}
+
+function normalizeMevnetRecord(record, index) {
+  const attrs = record?.attributes && typeof record.attributes === "object" ? record.attributes : record;
+  const latitude = toNumber(attrs.latitude ?? attrs.Latitude);
+  const longitude = toNumber(attrs.longitude ?? attrs.Longitude);
+  const name = cleanString(attrs.location || attrs.Location || `MEVnet location ${index + 1}`);
+  const state = cleanString(attrs.state || attrs.State || "");
+  const pbt = cleanString(attrs.pbt || attrs.PBT || "");
+  const category = cleanString(attrs.category || attrs.Category || "");
+  const sourceDataDate = cleanString(attrs.data_as || attrs.DataAs || "");
+  const existingCount = Math.max(0, toWholeNumber(attrs.number_of_existing_ev_charger_s));
+  const proposedCount = Math.max(0, toWholeNumber(attrs.number_of_proposed_ev_charger__));
+  const acCount = Math.max(0, toWholeNumber(attrs.type_ac));
+  const dcCount = Math.max(0, toWholeNumber(attrs.type_dc));
+  const indoorCount = Math.max(0, toWholeNumber(attrs.indoor));
+  const outdoorCount = Math.max(0, toWholeNumber(attrs.outdoor));
+  const rawStatus = cleanString(attrs.status || attrs.Status || "");
+  const lifecycleStatus = /existing/i.test(rawStatus) || existingCount > 0 ? "existing" : "proposed";
+  const totalCount = Math.max(existingCount || proposedCount || acCount + dcCount || indoorCount + outdoorCount || 1, 1);
+  const availableCount = lifecycleStatus === "existing" ? Math.max(existingCount || totalCount, 1) : 0;
+  const providers = collectMevnetProviders(attrs);
+  const provider = providers[0] || "Unknown";
+  const plugTypes = collectMevnetPlugTypes({ acCount, dcCount, provider });
+  const address = [name, pbt, state, "Malaysia"].filter(Boolean).join(", ");
+
+  return {
+    id: cleanString(attrs.objectid || attrs.ObjectId || attrs.bil || attrs.Bil || `${latitude}-${longitude}-${index}`),
+    country: "my",
+    name,
+    address,
+    postalCode: "",
+    latitude,
+    longitude,
+    provider,
+    providerKey: getProviderKey(provider),
+    providers,
+    providerKeys: uniqueValues(providers.map((providerName) => getProviderKey(providerName))),
+    providerLabel: formatProviderLabel(providers),
+    providerInitials: providerInitials(provider),
+    status: lifecycleStatus === "existing" ? "available" : "offline",
+    availabilityLabel: lifecycleStatus === "existing" ? "Existing" : "Proposed",
+    lifecycleStatus,
+    availableCount,
+    totalCount,
+    operationHours: "",
+    position: [category, cleanString(attrs.indoor___outdoor || attrs.IndoorOutdoor || "")].filter(Boolean).join(" · "),
+    maxPowerKw: 0,
+    priceKnown: false,
+    minPriceKwh: null,
+    priceCurrency: "MYR",
+    region: state,
+    state,
+    pbt,
+    category,
+    sourceDataDate,
+    existingCount,
+    proposedCount,
+    acCount,
+    dcCount,
+    indoorCount,
+    outdoorCount,
+    plugTypes,
+    chargers: [],
   };
 }
 
@@ -129,6 +297,16 @@ function extractStationRecords(payload) {
   arrays.sort((a, b) => scoreRecordArray(b) - scoreRecordArray(a));
 
   return arrays[0] || [];
+}
+
+function extractMevnetRecords(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return [];
+  if (Array.isArray(payload.features)) return payload.features.map((feature) => feature.attributes || feature);
+  if (Array.isArray(payload.records)) return payload.records;
+  if (Array.isArray(payload.stations)) return payload.stations;
+
+  return [];
 }
 
 function walkPayload(value, arrays) {
@@ -284,6 +462,42 @@ function normalizePlugType(plug, provider = "") {
   };
 }
 
+function collectMevnetProviders(record) {
+  return MEVNET_PROVIDER_FIELDS.flatMap(([fieldName, providerName]) => {
+    const count = toWholeNumber(record[fieldName]);
+    return count > 0 ? [providerName] : [];
+  });
+}
+
+function collectMevnetPlugTypes({ acCount, dcCount, provider }) {
+  const plugTypes = [];
+  if (acCount > 0) {
+    plugTypes.push({
+      plugType: "AC",
+      powerRating: "AC",
+      chargingSpeed: "",
+      price: "",
+      priceType: "",
+      provider: cleanString(provider),
+      providerKey: provider ? getProviderKey(provider) : "unknown",
+    });
+  }
+
+  if (dcCount > 0) {
+    plugTypes.push({
+      plugType: "DC",
+      powerRating: "DC",
+      chargingSpeed: "",
+      price: "",
+      priceType: "",
+      provider: cleanString(provider),
+      providerKey: provider ? getProviderKey(provider) : "unknown",
+    });
+  }
+
+  return plugTypes;
+}
+
 function normalizeStatus(value, connectorStatuses) {
   if (connectorStatuses.length > 0) {
     if (connectorStatuses.some((status) => status === "available")) return "available";
@@ -314,8 +528,21 @@ function statusRank(status) {
   return { available: 0, occupied: 1, offline: 2, unknown: 3 }[status] ?? 3;
 }
 
+function lifecycleRank(status) {
+  return { existing: 0, proposed: 1 }[status] ?? 2;
+}
+
 function maxPower(plugTypes) {
   return Math.max(0, ...plugTypes.map((plug) => Number.parseFloat(plug.chargingSpeed)).filter(Number.isFinite));
+}
+
+function getPriceKwh(plugTypes) {
+  const prices = plugTypes
+    .filter((plug) => /kwh/i.test(cleanString(plug.priceType)))
+    .map((plug) => Number.parseFloat(plug.price))
+    .filter((price) => Number.isFinite(price) && price >= 0);
+
+  return prices.length > 0 ? Math.min(...prices) : null;
 }
 
 function providerInitials(provider) {
@@ -350,6 +577,12 @@ function toArray(value) {
 function toNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : Number.NaN;
+}
+
+function toWholeNumber(value) {
+  if (value == null || value === "") return 0;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.trunc(number) : 0;
 }
 
 function cleanString(value) {

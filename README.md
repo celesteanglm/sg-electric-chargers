@@ -1,18 +1,18 @@
 # BoCharge
 
-Mobile-first Singapore EV charger map.
+Mobile-first Singapore and Malaysia EV charger map.
 
 Product planning notes live in [docs/todo.md](docs/todo.md). Data and third-party asset notices live in [NOTICE.md](NOTICE.md).
 
 ## Project Status
 
-BoCharge is an open-source web app for finding EV charging stations in Singapore. The app uses a Node/Express API, a Vite/React frontend, LTA DataMall for charger data, optional OneMap place search, optional Google Analytics, and OpenStreetMap tiles.
+BoCharge is an open-source web app for finding EV charging stations in Singapore and Malaysia. The app uses a Node/Express API, a Vite/React frontend, LTA DataMall for Singapore charger data, PLANMalaysia MEVnet for Malaysia charger locations, optional OneMap place search for Singapore, optional Google Analytics, and OpenStreetMap tiles.
 
-Production deployments should keep API credentials server-side, run one replica unless shared caching is added, and validate LTA/OneMap terms before redistributing derived data outside this app.
+Production deployments should keep API credentials server-side, run one replica unless shared caching is added, and validate LTA/OneMap/MEVnet terms before redistributing derived data outside this app.
 
-## Data Source And Refresh Cadence
+## Data Sources And Refresh Cadence
 
-The production data source is LTA DataMall's EV Charging Points Batch API:
+The production Singapore data source is LTA DataMall's EV Charging Points Batch API:
 
 ```text
 https://datamall2.mytransport.sg/ltaodataservice/EVCBatch
@@ -22,7 +22,7 @@ LTA documents this dataset as a single-file feed for all EV charging points in S
 
 This app follows that cadence:
 
-- Browser -> `GET /api/chargers`
+- Browser -> `GET /api/chargers?country=sg`
 - Server -> calls LTA for the current 5-minute refresh slot, and also runs a background refresh on those same clock boundaries when `LTA_ACCOUNT_KEY` is configured
 - Default `CACHE_TTL_MS` -> `300000` ms, or 5 minutes
 - Browser auto-refresh -> the next `:00`, `:05`, `:10`, `:15`, etc. 5-minute clock boundary, shown in the app as SGT
@@ -31,6 +31,21 @@ This app follows that cadence:
 - If no `LTA_ACCOUNT_KEY` is configured, the app uses `public/data/sample-chargers.json`
 
 This means normal production traffic should make roughly one LTA batch refresh per running server process at each 5-minute boundary, not one LTA call per user. A cold server with no live cache may still warm itself on the first request so the website can show data immediately.
+
+The Malaysia data source is PLANMalaysia's public MEVnet ArcGIS FeatureServer:
+
+```text
+https://gisdev.planmalaysia.gov.my/server/rest/services/Hosted/MEVnet_EVCB/FeatureServer/0
+```
+
+MEVnet publishes public existing and proposed charging bay locations, state and local authority fields, AC/DC counts, indoor/outdoor fields, and provider-network counts. MEVnet does not publish real-time plug availability or tariff fields. The current MEVnet network fields do not expose Tesla as a distinct provider; if Tesla chargers exist in the source, they are not distinguishable from the published provider fields. The app caches MEVnet server-side for **7 days** by default using `MEVNET_CACHE_TTL_MS`; MEVnet describes its source updates as monthly/manual and subject to data availability.
+
+Use the country query parameter to request a specific source:
+
+```text
+GET /api/chargers?country=sg
+GET /api/chargers?country=my
+```
 
 ## Region Filters
 
@@ -47,7 +62,7 @@ These are lightweight geographic buckets for filtering and should not be treated
 
 Typed search is free-first. The browser normalizes the query, removes words such as `near` and `around`, scores local charger text matches, and supports common place aliases such as `mbs`. Known places such as Marina Bay and Marina Bay Sands rank chargers by nearby distance rather than requiring the place name to appear in the charger record.
 
-For place queries that are not covered locally, the server exposes:
+For Singapore place queries that are not covered locally, the server exposes:
 
 ```text
 GET /api/search-place?q=marina%20bay%20sands
@@ -71,6 +86,8 @@ Never put the LTA key in client-side code or a `VITE_` variable. Keep it server-
 LTA_ACCOUNT_KEY=your_lta_datamall_account_key
 CACHE_TTL_MS=300000
 LTA_FETCH_TIMEOUT_MS=15000
+MEVNET_CACHE_TTL_MS=604800000
+MEVNET_FETCH_TIMEOUT_MS=15000
 ONEMAP_API_TOKEN=optional_onemap_token
 # Or use ONEMAP_EMAIL and ONEMAP_PASSWORD so the server can refresh tokens.
 ONEMAP_CACHE_TTL_MS=2592000000
@@ -98,6 +115,7 @@ When a measurement ID is set, the client loads Google's `gtag.js` script and rec
 npm install
 cp .env.example .env
 # Add LTA_ACCOUNT_KEY in .env for the live all-Singapore feed.
+# Malaysia MEVnet works without a key.
 npm run dev
 ```
 
@@ -117,7 +135,8 @@ Useful checks:
 ```bash
 npm run check
 curl http://127.0.0.1:8787/api/health
-curl http://127.0.0.1:8787/api/chargers
+curl http://127.0.0.1:8787/api/chargers?country=sg
+curl http://127.0.0.1:8787/api/chargers?country=my
 ```
 
 `npm run check` runs the production dependency audit and frontend build. Pull requests should pass this before merge.
@@ -166,7 +185,8 @@ After deployment, open the Railway public domain and verify:
 
 ```text
 https://your-service.up.railway.app/api/health
-https://your-service.up.railway.app/api/chargers
+https://your-service.up.railway.app/api/chargers?country=sg
+https://your-service.up.railway.app/api/chargers?country=my
 ```
 
 Expected live health response:
@@ -175,16 +195,26 @@ Expected live health response:
 {
   "ok": true,
   "ltaConfigured": true,
-  "cache": null
+  "cache": null,
+  "countries": {
+    "sg": {
+      "configured": true,
+      "cache": null
+    },
+    "my": {
+      "configured": true,
+      "cache": null
+    }
+  }
 }
 ```
 
-`cache` will be `null` before the first `/api/chargers` request. After the first successful live request, it should include `refreshedAt`, `expiresAt`, and `ageSeconds`.
+`cache` will be `null` before the first Singapore `/api/chargers` request. `countries.my.cache` will be `null` before the first Malaysia request. After the first successful live request, each cache should include `refreshedAt`, `expiresAt`, and `ageSeconds`.
 
 ### 5. Operational Notes
 
 - Keep replicas at `1` unless you add a shared cache such as Redis. The current cache is in-memory, so each replica would refresh LTA separately.
-- If traffic grows, add Redis and move the `/api/chargers` cache there before scaling horizontally.
+- If traffic grows, add Redis and move the `/api/chargers` caches there before scaling horizontally.
 - Do not log `LTA_ACCOUNT_KEY`.
 - If `/api/chargers` returns `source: "sample"`, either the key is missing or the live LTA call failed before any live cache existed.
 - If `cache.status` is `stale`, users are seeing the last successful live payload while a refresh problem is present; the public UI still fills silently and the failure is logged server-side.

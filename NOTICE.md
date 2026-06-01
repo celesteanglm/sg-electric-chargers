@@ -8,6 +8,10 @@ BoCharge uses LTA DataMall's EV Charging Points Batch API for production charger
 
 Use of LTA API datasets is governed by the Singapore Open Data Licence and LTA's API Terms of Service. Production operators are responsible for keeping their own `LTA_ACCOUNT_KEY` secure and complying with the current LTA terms.
 
+BoCharge uses PLANMalaysia MEVnet's public ArcGIS FeatureServer for Malaysia charger-location data. MEVnet describes its records as public existing and proposed charging bay locations for monitoring, planning, and public information; it does not provide real-time availability or tariff fields.
+
+Production operators are responsible for checking current PLANMalaysia/MEVnet terms before redistributing derived Malaysia data outside this app.
+
 OneMap place search is optional. If enabled, operators are responsible for complying with OneMap API terms and keeping OneMap credentials server-side.
 
 ## Maps

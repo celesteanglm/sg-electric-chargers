@@ -24,15 +24,18 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { normalizeChargerStations } from "./lib/chargers.js";
+import { getStationPriceKwh, normalizeChargerStations } from "./lib/chargers.js";
 import { trackPageView } from "./lib/analytics.js";
 import { PLACE_SEARCH_RADIUS_METERS, buildSearchQuery, rankStationSearchMatches } from "./lib/search.js";
 import { canOpenProviderApp, getProviderAppTarget, getProviderProfile, openProviderApp } from "./data/providerApps.js";
 
 const SINGAPORE_CENTER = [1.3521, 103.8198];
+const MALAYSIA_CENTER = [4.2105, 101.9758];
 const AREA_CENTER = { latitude: SINGAPORE_CENTER[0], longitude: SINGAPORE_CENTER[1] };
 const DEFAULT_ZOOM = 11;
+const MALAYSIA_ZOOM = 6;
 const CLIENT_REFRESH_MS = 5 * 60 * 1000;
+const MALAYSIA_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
 const SG_TIME_ZONE = "Asia/Singapore";
 const FEEDBACK_EMAIL = "celeste@agents.world";
 const SHEET_DRAG_THRESHOLD_PX = 44;
@@ -40,8 +43,46 @@ const SHEET_CONTENT_DRAG_THRESHOLD_PX = 6;
 const SHEET_VELOCITY_SAMPLE_MS = 140;
 const SHEET_FLICK_VELOCITY_PX_PER_MS = 0.45;
 const SHEET_MIN_VELOCITY_DISTANCE_PX = 8;
+const COLLAPSED_SHEET_HEIGHT_PX = 164;
 const MOBILE_SHEET_QUERY = "(max-width: 860px)";
 const RESULT_PAGE_SIZE = 10;
+const COUNTRY_OPTIONS = [
+  {
+    id: "sg",
+    label: "Singapore",
+    flag: "🇸🇬",
+    center: SINGAPORE_CENTER,
+    zoom: DEFAULT_ZOOM,
+    minZoom: 10,
+    refreshMs: CLIENT_REFRESH_MS,
+    placeSearchEnabled: true,
+    tagline: "Singapore EV chargers, refreshed every 5 min.",
+    loadingLabel: "Loading Singapore chargers",
+    areaLabel: "Area",
+    availabilityFilterLabel: "Available now",
+    availabilitySummaryLabel: "open plugs",
+    resultHeader: "Available chargers",
+    feedPrefix: "LTA DataMall updated at:",
+  },
+  {
+    id: "my",
+    label: "Malaysia",
+    flag: "🇲🇾",
+    center: MALAYSIA_CENTER,
+    zoom: MALAYSIA_ZOOM,
+    minZoom: 5,
+    refreshMs: MALAYSIA_REFRESH_MS,
+    placeSearchEnabled: false,
+    tagline: "Malaysia EV charger locations from MEVnet.",
+    loadingLabel: "Loading Malaysia chargers",
+    areaLabel: "State",
+    availabilityFilterLabel: "Existing",
+    availabilitySummaryLabel: "existing bays",
+    resultHeader: "Existing and proposed locations",
+    feedPrefix: "MEVnet data as of:",
+  },
+];
+const COUNTRY_CONFIGS = Object.fromEntries(COUNTRY_OPTIONS.map((country) => [country.id, country]));
 const AREA_FILTERS = [
   { id: "central", label: "Central", color: "#08a7d8", textColor: "#06283a" },
   { id: "north", label: "North", color: "#17875a", textColor: "#ffffff" },
@@ -112,6 +153,7 @@ export default function App() {
 }
 
 function ChargerMapPage({ onNavigate }) {
+  const [selectedCountry, setSelectedCountry] = useState("sg");
   const [stations, setStations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [selectionMode, setSelectionMode] = useState("auto");
@@ -119,12 +161,15 @@ function ChargerMapPage({ onNavigate }) {
   const [resolvedPlace, setResolvedPlace] = useState(null);
   const [placeSearchStatus, setPlaceSearchStatus] = useState("idle");
   const [placeSearchWarning, setPlaceSearchWarning] = useState("");
-  const [selectedFilters, setSelectedFilters] = useState(createDefaultFilterState);
+  const [selectedFilters, setSelectedFilters] = useState(() => createDefaultFilterState("sg"));
   const [feed, setFeed] = useState({
     loading: true,
     sourceLabel: "Loading",
     warning: "",
     updatedAt: "",
+    updatedAtLabel: "",
+    refreshIntervalMs: CLIENT_REFRESH_MS,
+    supportsLiveAvailability: true,
     cache: null,
   });
   const [userLocation, setUserLocation] = useState(null);
@@ -151,34 +196,61 @@ function ChargerMapPage({ onNavigate }) {
   const searchCandidatesRef = useRef([]);
   const selectedFiltersRef = useRef(selectedFilters);
   const applyingLocationAreaFilter = useRef(false);
-  const areaFilters = useMemo(() => buildAreaFilterOptions(stations), [stations]);
+  const selectedCountryConfig = COUNTRY_CONFIGS[selectedCountry] || COUNTRY_CONFIGS.sg;
+  const areaFilters = useMemo(() => buildAreaFilterOptions(stations, selectedCountry), [selectedCountry, stations]);
   const operatorFilters = useMemo(() => buildOperatorFilterOptions(stations), [stations]);
   const connectorTypeFilters = useMemo(() => buildConnectorTypeFilterOptions(stations), [stations]);
   const activeAreaIds = useMemo(() => new Set(selectedFilters.areas), [selectedFilters.areas]);
   const activeOperatorIds = useMemo(() => new Set(selectedFilters.operators), [selectedFilters.operators]);
   const activeConnectorTypeIds = useMemo(() => new Set(selectedFilters.connectorTypes), [selectedFilters.connectorTypes]);
-  const extendedFilterCount = selectedFilters.areas.length + selectedFilters.operators.length + selectedFilters.connectorTypes.length;
+  const priceStats = useMemo(() => buildPriceStats(stations), [stations]);
+  const priceCurrencyPrefix = selectedCountry === "my" ? "RM" : "S$";
+  const hasKnownPrices = priceStats.max != null;
+  const priceFilterCount = (selectedFilters.maxPriceKwh ? 1 : 0) + (selectedFilters.includeUnknownPrices ? 0 : 1);
+  const extendedFilterCount =
+    selectedFilters.areas.length + selectedFilters.operators.length + selectedFilters.connectorTypes.length + priceFilterCount;
   const allFiltersActive = !hasActiveFilters(selectedFilters);
   const utilityFilterCounts = useMemo(
     () => ({
       all: stations.length,
-      available: stations.filter((station) => station.availableCount > 0).length,
+      available: stations.filter((station) => stationMatchesPrimaryAvailability(station, selectedCountry)).length,
       fast: stations.filter((station) => station.maxPowerKw >= 43).length,
     }),
-    [stations],
+    [selectedCountry, stations],
+  );
+  const quickFilters = useMemo(
+    () =>
+      QUICK_FILTERS.filter((item) => selectedCountry === "sg" || item.id !== "fast").map((item) =>
+        item.id === "available" ? { ...item, label: selectedCountryConfig.availabilityFilterLabel } : item,
+      ),
+    [selectedCountry, selectedCountryConfig.availabilityFilterLabel],
   );
 
   useEffect(() => {
     let mounted = true;
     let inFlight = false;
     let refreshTimer = null;
+    const countryConfig = COUNTRY_CONFIGS[selectedCountry] || COUNTRY_CONFIGS.sg;
+
+    setStations([]);
+    setSelectedId(null);
+    setFeed({
+      loading: true,
+      sourceLabel: "Loading",
+      warning: "",
+      updatedAt: "",
+      updatedAtLabel: "",
+      refreshIntervalMs: countryConfig.refreshMs,
+      supportsLiveAvailability: selectedCountry === "sg",
+      cache: null,
+    });
 
     async function loadChargers() {
       if (inFlight) return;
       inFlight = true;
 
       try {
-        const response = await fetch("/api/chargers");
+        const response = await fetch(`/api/chargers?country=${encodeURIComponent(selectedCountry)}`);
         if (!response.ok) throw new Error(`API returned ${response.status}`);
         const payload = await response.json();
         const nextStations = getStationPayload(payload);
@@ -194,9 +266,30 @@ function ChargerMapPage({ onNavigate }) {
           sourceLabel: payload.sourceLabel || "LTA DataMall",
           warning: payload.warning || "",
           updatedAt: payload.updatedAt || payload.lastUpdatedTime || "",
+          updatedAtLabel: payload.updatedAtLabel || "",
+          refreshIntervalMs: payload.refreshIntervalMs || countryConfig.refreshMs,
+          supportsLiveAvailability: payload.supportsLiveAvailability !== false,
           cache: payload.cache || null,
         });
       } catch (error) {
+        if (selectedCountry !== "sg") {
+          if (!mounted) return;
+
+          setStations([]);
+          setSelectedId(null);
+          setFeed({
+            loading: false,
+            sourceLabel: "PLANMalaysia MEVnet",
+            warning: error instanceof Error ? error.message : "Unable to load Malaysia chargers.",
+            updatedAt: "",
+            updatedAtLabel: "",
+            refreshIntervalMs: countryConfig.refreshMs,
+            supportsLiveAvailability: false,
+            cache: null,
+          });
+          return;
+        }
+
         const response = await fetch("/data/sample-chargers.json");
         const payload = await response.json();
         const nextStations = getStationPayload(payload);
@@ -212,6 +305,9 @@ function ChargerMapPage({ onNavigate }) {
           sourceLabel: "Sample fallback",
           warning: error instanceof Error ? error.message : "Unable to load chargers.",
           updatedAt: payload.updatedAt || payload.lastUpdatedTime || "",
+          updatedAtLabel: "",
+          refreshIntervalMs: countryConfig.refreshMs,
+          supportsLiveAvailability: true,
           cache: null,
         });
       } finally {
@@ -223,7 +319,7 @@ function ChargerMapPage({ onNavigate }) {
       refreshTimer = window.setTimeout(async () => {
         await loadChargers();
         if (mounted) scheduleNextRefresh();
-      }, getMsUntilNextRefreshBoundary());
+      }, getRefreshDelayMs(selectedCountry, countryConfig.refreshMs));
     }
 
     loadChargers();
@@ -233,7 +329,7 @@ function ChargerMapPage({ onNavigate }) {
       mounted = false;
       if (refreshTimer) window.clearTimeout(refreshTimer);
     };
-  }, []);
+  }, [selectedCountry]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia(MOBILE_SHEET_QUERY);
@@ -321,7 +417,7 @@ function ChargerMapPage({ onNavigate }) {
     () => new Map(textSearchMatches.map((match) => [match.station.id, match.score])),
     [textSearchMatches],
   );
-  const searchPlace = searchQuery.knownPlace || resolvedPlace;
+  const searchPlace = selectedCountryConfig.placeSearchEnabled ? searchQuery.knownPlace || resolvedPlace : null;
   const searchOrigin = useMemo(
     () => (searchPlace ? [searchPlace.latitude, searchPlace.longitude] : null),
     [searchPlace],
@@ -334,9 +430,9 @@ function ChargerMapPage({ onNavigate }) {
   const filteredStations = useMemo(
     () =>
       searchCandidates.filter((station) =>
-        stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds),
+        stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, selectedCountry),
       ),
-    [activeAreaIds, activeConnectorTypeIds, activeOperatorIds, searchCandidates, selectedFilters],
+    [activeAreaIds, activeConnectorTypeIds, activeOperatorIds, searchCandidates, selectedCountry, selectedFilters],
   );
 
   // Viewport culling — only render markers visible on the map (with padding buffer)
@@ -391,6 +487,7 @@ function ChargerMapPage({ onNavigate }) {
 
   useEffect(() => {
     const shouldSearchPlace =
+      selectedCountryConfig.placeSearchEnabled &&
       searchQuery.active &&
       !searchQuery.knownPlace &&
       (searchQuery.hasPlaceIntent || textSearchMatches.length === 0) &&
@@ -447,6 +544,7 @@ function ChargerMapPage({ onNavigate }) {
     searchQuery.hasPlaceIntent,
     searchQuery.knownPlace,
     searchQuery.normalized,
+    selectedCountryConfig.placeSearchEnabled,
     textSearchMatches.length,
   ]);
 
@@ -566,6 +664,27 @@ function ChargerMapPage({ onNavigate }) {
     });
   }
 
+  function handleCountryChange(countryId) {
+    if (countryId === selectedCountry || !COUNTRY_CONFIGS[countryId]) return;
+
+    stopLocationWatch();
+    setSelectedCountry(countryId);
+    setQuery("");
+    setResolvedPlace(null);
+    setPlaceSearchStatus("idle");
+    setPlaceSearchWarning("");
+    setSelectedFilters(createDefaultFilterState(countryId));
+    selectedFiltersRef.current = createDefaultFilterState(countryId);
+    setSelectedId(null);
+    setSelectionMode("auto");
+    setUserLocation(null);
+    setUserLocationAccuracy(null);
+    setMapBounds(null);
+    setMapCenter(COUNTRY_CONFIGS[countryId].center);
+    setResultPage(1);
+    setLocationNotice("");
+  }
+
   const selectStation = useCallback((station) => {
     setSelectionMode("manual");
     setSelectedId(station.id);
@@ -623,14 +742,15 @@ function ChargerMapPage({ onNavigate }) {
   function handleUserPosition(position, { focusNearest }) {
     const nextLocation = [position.coords.latitude, position.coords.longitude];
     const locationAccuracyLabel = formatAccuracyMeters(position.coords.accuracy);
-    const locationArea = getStationArea({ latitude: nextLocation[0], longitude: nextLocation[1] });
-    const nextFilters = applyAreaFilter(selectedFiltersRef.current, locationArea.id);
+    const locationArea =
+      selectedCountry === "sg" ? getStationArea({ latitude: nextLocation[0], longitude: nextLocation[1] }, selectedCountry) : null;
+    const nextFilters = locationArea ? applyAreaFilter(selectedFiltersRef.current, locationArea.id) : selectedFiltersRef.current;
     const areaFilterChanged = nextFilters !== selectedFiltersRef.current;
     const nextActiveAreaIds = new Set(nextFilters.areas);
     const nextActiveOperatorIds = new Set(nextFilters.operators);
     const nextActiveConnectorTypeIds = new Set(nextFilters.connectorTypes);
     const currentFilteredStations = searchCandidatesRef.current.filter((station) =>
-      stationPassesFilters(station, nextFilters, nextActiveAreaIds, nextActiveOperatorIds, nextActiveConnectorTypeIds),
+      stationPassesFilters(station, nextFilters, nextActiveAreaIds, nextActiveOperatorIds, nextActiveConnectorTypeIds, selectedCountry),
     );
 
     setUserLocation((current) => (current && isSameMapCenter(current, nextLocation) ? current : nextLocation));
@@ -646,7 +766,7 @@ function ChargerMapPage({ onNavigate }) {
       if (focusNearest) {
         setLocationNotice(
           [
-            areaFilterChanged ? `Switched area filter to ${locationArea.label}.` : "",
+            areaFilterChanged && locationArea ? `Switched area filter to ${locationArea.label}.` : "",
             "No visible chargers match the current filters.",
           ]
             .filter(Boolean)
@@ -673,7 +793,7 @@ function ChargerMapPage({ onNavigate }) {
     setSheetMode("expanded");
     setLocationNotice(
       [
-        areaFilterChanged ? `Switched area filter to ${locationArea.label}.` : "",
+        areaFilterChanged && locationArea ? `Switched area filter to ${locationArea.label}.` : "",
         "Tracking your location and selected the closest charger in the current filtered list.",
         locationAccuracyLabel ? `Accuracy: ${locationAccuracyLabel}.` : "",
       ]
@@ -693,7 +813,7 @@ function ChargerMapPage({ onNavigate }) {
   function getSheetSnapHeights() {
     return {
       expandedHeight: Math.min(window.innerHeight * 0.68, 620),
-      collapsedHeight: Math.max(122, 108),
+      collapsedHeight: COLLAPSED_SHEET_HEIGHT_PX,
     };
   }
 
@@ -987,10 +1107,9 @@ function ChargerMapPage({ onNavigate }) {
   }
 
   const openConnectorCount = filteredStations.reduce((sum, station) => sum + station.availableCount, 0);
-  const totalConnectors = filteredStations.reduce((sum, station) => sum + station.totalCount, 0);
-  const feedUpdatedLabel = formatFeedTime(feed.updatedAt);
+  const feedUpdatedLabel = formatFeedTime(feed, selectedCountryConfig);
   const feedbackHref = getFeedbackMailto({
-    filterLabel: getActiveFilterLabel(selectedFilters, areaFilters, operatorFilters, connectorTypeFilters),
+    filterLabel: getActiveFilterLabel(selectedFilters, areaFilters, operatorFilters, connectorTypeFilters, selectedCountryConfig),
     query,
     visibleCount: filteredStations.length,
   });
@@ -1033,9 +1152,24 @@ function ChargerMapPage({ onNavigate }) {
     }));
   }
 
+  function handleMaxPriceChange(event) {
+    const value = event.target.value;
+    updateSelectedFilters((current) => ({
+      ...current,
+      maxPriceKwh: value,
+    }));
+  }
+
+  function toggleUnknownPrices() {
+    updateSelectedFilters((current) => ({
+      ...current,
+      includeUnknownPrices: !current.includeUnknownPrices,
+    }));
+  }
+
   return (
     <main className="app-shell">
-      <section className="map-stage" aria-label="Singapore EV charger map">
+      <section className="map-stage" aria-label={`${selectedCountryConfig.label} EV charger map`}>
         <div className="top-panel">
           <div className="brand-row">
             <div className="brand-mark" aria-hidden="true">
@@ -1046,14 +1180,14 @@ function ChargerMapPage({ onNavigate }) {
                 <h1>BoCharge</h1>
                 <span className={feed.loading ? "live-pill loading" : "live-pill"}>
                   <span aria-hidden="true" />
-                  {feed.loading ? "Syncing" : "Live map"}
+                  {feed.loading ? "Syncing" : selectedCountry === "sg" ? "Live map" : "Weekly map"}
                 </span>
               </div>
-              <p className="brand-tagline">Singapore EV chargers, refreshed every 5 min.</p>
+              <p className="brand-tagline">{selectedCountryConfig.tagline}</p>
               <p className="brand-status">
                 {feed.loading
-                  ? "Loading Singapore chargers"
-                  : `${filteredStations.length} visible · ${openConnectorCount} open plugs`}
+                  ? selectedCountryConfig.loadingLabel
+                  : `${filteredStations.length} visible · ${openConnectorCount} ${selectedCountryConfig.availabilitySummaryLabel}`}
               </p>
             </div>
             <div className="brand-actions">
@@ -1084,8 +1218,8 @@ function ChargerMapPage({ onNavigate }) {
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search place, area, or provider"
-              aria-label="Search charging places, areas, or providers"
+              placeholder={selectedCountry === "sg" ? "Search place, area, or provider" : "Search location, state, or network"}
+              aria-label="Search charging locations, areas, or providers"
             />
             {query ? (
               <button type="button" onClick={() => setQuery("")} aria-label="Clear search">
@@ -1104,7 +1238,7 @@ function ChargerMapPage({ onNavigate }) {
                 item={ALL_FILTER}
                 onSelect={clearFilters}
               />
-              {QUICK_FILTERS.map((item) => (
+              {quickFilters.map((item) => (
                 <UtilityFilterChip
                   active={selectedFilters[item.stateKey]}
                   ariaLabel={`${selectedFilters[item.stateKey] ? "Remove" : "Add"} ${item.label} filter.`}
@@ -1130,14 +1264,31 @@ function ChargerMapPage({ onNavigate }) {
 
           {filterPanelOpen ? (
             <div className="filter-panel" aria-label="Extended filters">
+              <div className="filter-section">
+                <span className="filter-section-label">Country</span>
+                <div className="country-toggle" aria-label="Country filter">
+                  {COUNTRY_OPTIONS.map((country) => (
+                    <button
+                      className={selectedCountry === country.id ? "country-toggle-button active" : "country-toggle-button"}
+                      type="button"
+                      key={country.id}
+                      onClick={() => handleCountryChange(country.id)}
+                      aria-pressed={selectedCountry === country.id}
+                    >
+                      <span className="country-flag" aria-hidden="true">{country.flag}</span>
+                      {country.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {areaFilters.length > 0 ? (
                 <div className="filter-section">
-                  <span className="filter-section-label">Area</span>
+                  <span className="filter-section-label">{selectedCountryConfig.areaLabel}</span>
                   <div className="filter-section-chips">
                     {areaFilters.map((item) => (
                       <UtilityFilterChip
                         active={activeAreaIds.has(item.areaId)}
-                        ariaLabel={`${activeAreaIds.has(item.areaId) ? "Remove" : "Add"} ${item.label} area filter. ${item.availableCount} open plugs across ${item.stationCount} stations.`}
+                        ariaLabel={`${activeAreaIds.has(item.areaId) ? "Remove" : "Add"} ${item.label} area filter. ${item.availableCount} ${selectedCountryConfig.availabilitySummaryLabel} across ${item.stationCount} stations.`}
                         count={item.availableCount}
                         item={item}
                         key={item.id}
@@ -1156,6 +1307,7 @@ function ChargerMapPage({ onNavigate }) {
                         active={activeOperatorIds.has(item.id)}
                         item={item}
                         key={item.id}
+                        countLabel={selectedCountryConfig.availabilitySummaryLabel}
                         onSelect={() => toggleOperatorFilter(item.id)}
                       />
                     ))}
@@ -1179,6 +1331,39 @@ function ChargerMapPage({ onNavigate }) {
                   </div>
                 </div>
               ) : null}
+              <div className="filter-section">
+                <span className="filter-section-label">Price</span>
+                <div className="price-filter-row">
+                  <label className="price-input">
+                    <span>{hasKnownPrices ? `Max ${priceCurrencyPrefix}/kWh` : `${priceCurrencyPrefix}/kWh unavailable`}</span>
+                    <small>
+                      {hasKnownPrices
+                        ? `Current max ${priceCurrencyPrefix}${formatPriceAmount(priceStats.max)}/kWh`
+                        : "No current price data"}
+                    </small>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={selectedFilters.maxPriceKwh}
+                      onChange={handleMaxPriceChange}
+                      placeholder={hasKnownPrices ? formatPriceAmount(priceStats.max) : "No data"}
+                      disabled={!hasKnownPrices}
+                    />
+                  </label>
+                  <label className="unknown-price-toggle">
+                    <input
+                      type="checkbox"
+                      checked={selectedFilters.includeUnknownPrices}
+                      onChange={toggleUnknownPrices}
+                    />
+                    Include unknown prices
+                  </label>
+                </div>
+                {selectedCountry === "my" ? (
+                  <p className="filter-note">MEVnet does not publish tariff fields, so no current max RM/kWh can be shown.</p>
+                ) : null}
+              </div>
             </div>
           ) : null}
           </div>
@@ -1187,9 +1372,10 @@ function ChargerMapPage({ onNavigate }) {
         </div>
 
         <MapContainer
-          center={SINGAPORE_CENTER}
-          zoom={DEFAULT_ZOOM}
-          minZoom={10}
+          key={selectedCountry}
+          center={selectedCountryConfig.center}
+          zoom={selectedCountryConfig.zoom}
+          minZoom={selectedCountryConfig.minZoom}
           maxZoom={18}
           zoomControl={false}
           scrollWheelZoom
@@ -1248,11 +1434,7 @@ function ChargerMapPage({ onNavigate }) {
             <span>{feedUpdatedLabel}</span>
           </div>
 
-          <div className="summary-strip">
-            <StatTile label="Open plugs" value={`${openConnectorCount}/${totalConnectors}`} tone="green" />
-            <StatTile label="Stations" value={filteredStations.length} tone="blue" />
-            <StatTile label="Source" value={feed.sourceLabel.replace(" fallback", "")} tone="dark" />
-          </div>
+          {selectedStation ? <CompactStationSummary station={selectedStation} /> : null}
 
           {feed.warning ? <div className="feed-warning">{feed.warning}</div> : null}
 
@@ -1277,7 +1459,7 @@ function ChargerMapPage({ onNavigate }) {
           )}
 
           <div className="nearby-header">
-            <span>Available chargers</span>
+            <span>{selectedCountryConfig.resultHeader}</span>
             <span>{resultSummary}</span>
           </div>
 
@@ -1300,7 +1482,7 @@ function ChargerMapPage({ onNavigate }) {
                   <div className="row-meta">
                     <ProviderBadges providers={station.providers?.length ? station.providers : [station.provider]} compact />
                     {distanceLabel ? <span className="row-distance">{distanceLabel} from {distanceSourceLabel}</span> : null}
-                    <b>{station.availableCount} open</b>
+                    <b>{formatStationAvailability(station)}</b>
                   </div>
                 </button>
               );
@@ -1342,41 +1524,36 @@ function ChargerMapPage({ onNavigate }) {
 function DataInfoPage({ onNavigate }) {
   const [sourceInfo, setSourceInfo] = useState({
     loading: true,
-    sourceLabel: "",
+    sg: null,
+    my: null,
     warning: "",
-    updatedAt: "",
-    cache: null,
   });
 
   useEffect(() => {
     let mounted = true;
 
     async function loadSourceInfo() {
-      try {
-        const response = await fetch("/api/chargers");
-        if (!response.ok) throw new Error(`API returned ${response.status}`);
-        const payload = await response.json();
+      const results = await Promise.allSettled([
+        fetchSourceInfo("sg"),
+        fetchSourceInfo("my"),
+      ]);
 
-        if (!mounted) return;
+      if (!mounted) return;
 
-        setSourceInfo({
-          loading: false,
-          sourceLabel: payload.sourceLabel || "LTA DataMall",
-          warning: payload.warning || "",
-          updatedAt: payload.updatedAt || payload.lastUpdatedTime || "",
-          cache: payload.cache || null,
-        });
-      } catch (error) {
-        if (!mounted) return;
+      const sg = results[0].status === "fulfilled" ? results[0].value : null;
+      const my = results[1].status === "fulfilled" ? results[1].value : null;
+      const warnings = results
+        .filter((result) => result.status === "rejected")
+        .map((result) => result.reason?.message || "Unable to load source status.");
+      if (sg?.warning) warnings.push(sg.warning);
+      if (my?.warning) warnings.push(my.warning);
 
-        setSourceInfo({
-          loading: false,
-          sourceLabel: "Unavailable",
-          warning: error instanceof Error ? error.message : "Unable to load data source status.",
-          updatedAt: "",
-          cache: null,
-        });
-      }
+      setSourceInfo({
+        loading: false,
+        sg,
+        my,
+        warning: warnings.join(" "),
+      });
     }
 
     loadSourceInfo();
@@ -1386,9 +1563,12 @@ function DataInfoPage({ onNavigate }) {
     };
   }, []);
 
-  const ltaUpdateTime = formatFeedTimeValue(sourceInfo.updatedAt);
-  const serverRefreshLabel = sourceInfo.cache?.refreshedAt ? formatSourceTimestamp(sourceInfo.cache.refreshedAt) : "Not available";
-  const cacheExpiryLabel = sourceInfo.cache?.expiresAt ? formatSourceTimestamp(sourceInfo.cache.expiresAt) : "At the next 5-minute slot";
+  const ltaUpdateTime = sourceInfo.sg?.updatedAtLabel || formatFeedTimeValue(sourceInfo.sg?.updatedAt);
+  const mevnetUpdateTime = sourceInfo.my?.updatedAtLabel || formatFeedTimeValue(sourceInfo.my?.updatedAt);
+  const sgServerRefreshLabel = sourceInfo.sg?.cache?.refreshedAt ? formatSourceTimestamp(sourceInfo.sg.cache.refreshedAt) : "Not available";
+  const myServerRefreshLabel = sourceInfo.my?.cache?.refreshedAt ? formatSourceTimestamp(sourceInfo.my.cache.refreshedAt) : "Not available";
+  const sgCacheExpiryLabel = sourceInfo.sg?.cache?.expiresAt ? formatSourceTimestamp(sourceInfo.sg.cache.expiresAt) : "At the next 5-minute slot";
+  const myCacheExpiryLabel = sourceInfo.my?.cache?.expiresAt ? formatSourceTimestamp(sourceInfo.my.cache.expiresAt) : "At the next weekly refresh";
 
   return (
     <main className="info-page">
@@ -1405,16 +1585,28 @@ function DataInfoPage({ onNavigate }) {
 
       <section className="info-status" aria-label="Current feed status">
         <div>
-          <span>Current source</span>
-          <strong>{sourceInfo.loading ? "Checking" : sourceInfo.sourceLabel || "Unknown"}</strong>
+          <span>Singapore source</span>
+          <strong>{sourceInfo.loading ? "Checking" : sourceInfo.sg?.sourceLabel || "Unknown"}</strong>
         </div>
         <div>
           <span>LTA DataMall update</span>
           <strong>{ltaUpdateTime}</strong>
         </div>
         <div>
-          <span>Server refresh</span>
-          <strong>{serverRefreshLabel}</strong>
+          <span>Singapore refresh</span>
+          <strong>{sgServerRefreshLabel}</strong>
+        </div>
+        <div>
+          <span>Malaysia source</span>
+          <strong>{sourceInfo.loading ? "Checking" : sourceInfo.my?.sourceLabel || "Unknown"}</strong>
+        </div>
+        <div>
+          <span>MEVnet source date</span>
+          <strong>{mevnetUpdateTime}</strong>
+        </div>
+        <div>
+          <span>Malaysia refresh</span>
+          <strong>{myServerRefreshLabel}</strong>
         </div>
       </section>
 
@@ -1430,8 +1622,8 @@ function DataInfoPage({ onNavigate }) {
           locations, operators, plug types, prices, and connector availability.
         </p>
         <p>
-          LTA publishes this as a batch file behind a temporary download link. The app requests that batch server-side so
-          the LTA account key is never exposed in browser code.
+          Malaysia locations come from PLANMalaysia's MEVnet ArcGIS FeatureServer. MEVnet includes public existing and
+          proposed charging bay locations, state, local authority, AC/DC counts, indoor/outdoor fields, and provider-network counts.
         </p>
       </section>
 
@@ -1441,10 +1633,11 @@ function DataInfoPage({ onNavigate }) {
           <h2>Freshness model</h2>
         </div>
         <ul>
-          <li>The visible timestamp is the LTA DataMall batch update time, not the time your browser loaded the page.</li>
-          <li>The data is refreshed every 5 min, aligned to LTA's documented update cadence.</li>
-          <li>Browser refreshes are also aligned to the next 5-minute boundary.</li>
-          <li>Current API cache expiry: {cacheExpiryLabel}.</li>
+          <li>Singapore's visible timestamp is the LTA DataMall batch update time, not the time your browser loaded the page.</li>
+          <li>Singapore data refreshes every 5 min, aligned to LTA's documented update cadence.</li>
+          <li>Malaysia data is cached by BoCharge for 7 days. MEVnet describes its source updates as monthly/manual and subject to data availability.</li>
+          <li>Singapore API cache expiry: {sgCacheExpiryLabel}.</li>
+          <li>Malaysia API cache expiry: {myCacheExpiryLabel}.</li>
         </ul>
       </section>
 
@@ -1455,9 +1648,11 @@ function DataInfoPage({ onNavigate }) {
         </div>
         <ul>
           <li>Availability can lag real-world charger usage because operators and LTA update the feed asynchronously.</li>
+          <li>Malaysia MEVnet records are not real-time plug availability; the app labels them as existing or proposed.</li>
+          <li>MEVnet does not publish tariff fields, so Malaysia price filtering treats those records as unknown price.</li>
           <li>Provider apps remain the best confirmation point before driving to a charger.</li>
           <li>If a live LTA refresh fails, the app can keep showing the last successful cached LTA payload.</li>
-          <li>If no LTA key is configured, the app falls back to a bundled snapshot and labels it as sample data.</li>
+          <li>If no LTA key is configured, Singapore falls back to a bundled snapshot and labels it as sample data.</li>
         </ul>
       </section>
 
@@ -1467,12 +1662,26 @@ function DataInfoPage({ onNavigate }) {
           <h2>Derived fields</h2>
         </div>
         <p>
-          Area filters such as North, South, East, West, and Central are derived from charger coordinates. They are
-          lightweight map buckets, not official planning-region boundaries.
+          Singapore area filters such as North, South, East, West, and Central are derived from charger coordinates.
+          Malaysia state filters use the `state` field published by MEVnet.
         </p>
       </section>
     </main>
   );
+}
+
+async function fetchSourceInfo(country) {
+  const response = await fetch(`/api/chargers?country=${encodeURIComponent(country)}`);
+  if (!response.ok) throw new Error(`${country.toUpperCase()} API returned ${response.status}`);
+  const payload = await response.json();
+
+  return {
+    sourceLabel: payload.sourceLabel || (country === "my" ? "PLANMalaysia MEVnet" : "LTA DataMall"),
+    warning: payload.warning || "",
+    updatedAt: payload.updatedAt || payload.lastUpdatedTime || "",
+    updatedAtLabel: payload.updatedAtLabel || "",
+    cache: payload.cache || null,
+  };
 }
 
 function getInitialSheetMode() {
@@ -1563,6 +1772,7 @@ function StationDetail({ station }) {
   const providerProfile = getProviderProfile(appProviderName);
   const providerAppTarget = getProviderAppTarget(appProviderName);
   const bestPlug = station.plugTypes[0];
+  const isMalaysia = station.country === "my";
 
   return (
     <article className="detail-card">
@@ -1570,7 +1780,7 @@ function StationDetail({ station }) {
         <div>
           <div className="provider-line">
             <ProviderBadges providers={providers} />
-            <StatusPill status={station.status} />
+            <StatusPill status={station.status} label={station.availabilityLabel} />
           </div>
           <h2>{station.name}</h2>
           <p>{station.address}</p>
@@ -1578,20 +1788,28 @@ function StationDetail({ station }) {
       </div>
 
       <div className="detail-grid">
-        <Metric label="Open plugs" value={`${station.availableCount}/${station.totalCount}`} />
-        <Metric label="Max speed" value={station.maxPowerKw ? `${station.maxPowerKw} kW` : "TBC"} />
-        <Metric label="Plug" value={bestPlug?.plugType || "TBC"} />
+        <Metric label={isMalaysia ? "Existing bays" : "Open plugs"} value={`${station.availableCount}/${station.totalCount}`} />
+        <Metric
+          label={isMalaysia ? "AC/DC" : "Max speed"}
+          value={isMalaysia ? `${station.acCount || 0}/${station.dcCount || 0}` : station.maxPowerKw ? `${station.maxPowerKw} kW` : "TBC"}
+        />
+        <Metric label={isMalaysia ? "Status" : "Plug"} value={isMalaysia ? station.availabilityLabel || "TBC" : bestPlug?.plugType || "TBC"} />
       </div>
 
       <div className="detail-meta">
         <span>
           <MapPin size={15} />
-          {station.position || station.operationHours || "Open status follows provider feed"}
+          {station.position || station.operationHours || (isMalaysia ? "MEVnet public planning dataset" : "Open status follows provider feed")}
         </span>
         {bestPlug?.price ? (
           <span>
             <BatteryCharging size={15} />
             {bestPlug.priceType ? `$${bestPlug.price}/${bestPlug.priceType}` : `$${bestPlug.price}`}
+          </span>
+        ) : station.priceKnown === false ? (
+          <span>
+            <Info size={15} />
+            Price unavailable
           </span>
         ) : null}
       </div>
@@ -1608,12 +1826,12 @@ function StationDetail({ station }) {
           Open in Google Maps
         </a>
 
-        {providerAppTarget.available ? (
+        {!isMalaysia && providerAppTarget.available ? (
           <button className="secondary-action" type="button" onClick={() => openProviderApp(appProviderName)}>
             <ExternalLink size={18} />
             Open {providerProfile.appName}
           </button>
-        ) : (
+        ) : !isMalaysia ? (
           <div className="provider-unavailable">
             <button className="secondary-action unavailable" type="button" disabled>
               <Info size={18} />
@@ -1621,7 +1839,7 @@ function StationDetail({ station }) {
             </button>
             <p>{providerAppTarget.unavailableMessage}</p>
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="connector-strip">
@@ -1685,7 +1903,7 @@ function UtilityFilterChip({ item, active, count, onSelect, ariaLabel }) {
   );
 }
 
-function OperatorFilterChip({ item, active, onSelect }) {
+function OperatorFilterChip({ item, active, onSelect, countLabel = "open plugs" }) {
   const { profile } = item;
   const iconLabel = profile.key === "unknown" ? getOperatorInitials(item.operatorName) : profile.markerLabel;
 
@@ -1698,7 +1916,7 @@ function OperatorFilterChip({ item, active, onSelect }) {
       }}
       type="button"
       onClick={onSelect}
-      aria-label={`${active ? "Remove" : "Add"} operator ${item.operatorName} filter. ${item.availableCount} open plugs across ${item.stationCount} stations.`}
+      aria-label={`${active ? "Remove" : "Add"} operator ${item.operatorName} filter. ${item.availableCount} ${countLabel} across ${item.stationCount} stations.`}
       aria-pressed={active}
       title={item.operatorName}
     >
@@ -1711,7 +1929,7 @@ function OperatorFilterChip({ item, active, onSelect }) {
       </span>
       <span className="operator-chip-copy">
         <span className="operator-chip-name">{item.label}</span>
-        <span className="operator-chip-count">{formatCompactCount(item.availableCount)} open plugs</span>
+        <span className="operator-chip-count">{formatCompactCount(item.availableCount)} {countLabel}</span>
       </span>
     </button>
   );
@@ -1734,15 +1952,6 @@ function ProviderBadges({ providers, compact = false }) {
   );
 }
 
-function StatTile({ label, value, tone }) {
-  return (
-    <div className={`stat-tile ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 function Metric({ label, value }) {
   return (
     <div className="metric">
@@ -1756,7 +1965,39 @@ function StatusDot({ status }) {
   return <span className={`status-dot ${status}`} aria-hidden="true" />;
 }
 
-function StatusPill({ status }) {
+function CompactStationSummary({ station }) {
+  const providers = station.providers?.length ? station.providers : [station.provider];
+  const price = getStationPriceKwh(station);
+  const isMalaysia = station.country === "my";
+  const currencyLabel = station.priceCurrency === "MYR" ? "RM" : "S$";
+  const priceLabel =
+    price != null
+      ? `${currencyLabel}${price.toFixed(2)}/kWh`
+      : station.priceKnown === false
+        ? "Price unknown"
+        : "Price TBC";
+  const speedLabel = isMalaysia
+    ? `${station.acCount || 0} AC / ${station.dcCount || 0} DC`
+    : station.maxPowerKw
+      ? `${station.maxPowerKw} kW`
+      : station.plugTypes[0]?.plugType || "Plug TBC";
+  const countLabel = isMalaysia
+    ? formatStationAvailability(station)
+    : `${formatCompactCount(station.availableCount)}/${formatCompactCount(station.totalCount)} open`;
+
+  return (
+    <div className="compact-station-summary" aria-label={`Selected charger: ${station.name}`}>
+      <div className="compact-station-topline">
+        <ProviderBadges providers={providers} compact />
+        <StatusPill status={station.status} label={station.availabilityLabel} />
+      </div>
+      <strong>{station.name}</strong>
+      <span>{[countLabel, speedLabel, priceLabel].filter(Boolean).join(" · ")}</span>
+    </div>
+  );
+}
+
+function StatusPill({ status, label }) {
   const labels = {
     available: "Open",
     occupied: "In use",
@@ -1764,7 +2005,7 @@ function StatusPill({ status }) {
     unknown: "Unknown",
   };
 
-  return <span className={`status-pill ${status}`}>{labels[status] || "Unknown"}</span>;
+  return <span className={`status-pill ${status}`}>{label || labels[status] || "Unknown"}</span>;
 }
 
 function createStationIcon(station, selected) {
@@ -1824,11 +2065,13 @@ function getFeedbackMailto({ filterLabel, query, visibleCount }) {
   return `mailto:${FEEDBACK_EMAIL}?subject=${subject}&body=${body}`;
 }
 
-function getActiveFilterLabel(filters, areaFilters, operatorFilters, connectorTypeFilters) {
+function getActiveFilterLabel(filters, areaFilters, operatorFilters, connectorTypeFilters, countryConfig = COUNTRY_CONFIGS.sg) {
   const labels = [];
 
-  if (filters.availableOnly) labels.push("Available now");
+  if (filters.availableOnly) labels.push(countryConfig.availabilityFilterLabel);
   if (filters.fastOnly) labels.push("Fast");
+  if (filters.maxPriceKwh) labels.push(`Max ${filters.maxPriceKwh}/kWh`);
+  if (!filters.includeUnknownPrices) labels.push("Known prices only");
 
   filters.areas.forEach((areaId) => {
     const areaFilter = areaFilters.find((item) => item.areaId === areaId);
@@ -1855,6 +2098,8 @@ function createDefaultFilterState() {
     areas: [],
     operators: [],
     connectorTypes: [],
+    maxPriceKwh: "",
+    includeUnknownPrices: true,
   };
 }
 
@@ -1865,6 +2110,8 @@ function createAllFilterState() {
     areas: [],
     operators: [],
     connectorTypes: [],
+    maxPriceKwh: "",
+    includeUnknownPrices: true,
   };
 }
 
@@ -1883,27 +2130,71 @@ function hasActiveFilters(filters) {
       filters.fastOnly ||
       filters.areas.length > 0 ||
       filters.operators.length > 0 ||
-      filters.connectorTypes.length > 0,
+      filters.connectorTypes.length > 0 ||
+      filters.maxPriceKwh ||
+      !filters.includeUnknownPrices,
   );
 }
 
-function stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds) {
-  const matchesAvailability = !selectedFilters.availableOnly || station.availableCount > 0;
+function stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, country = "sg") {
+  const matchesAvailability = !selectedFilters.availableOnly || stationMatchesPrimaryAvailability(station, country);
   const matchesSpeed = !selectedFilters.fastOnly || station.maxPowerKw >= 43;
-  const matchesArea = activeAreaIds.size === 0 || activeAreaIds.has(getStationArea(station).id);
+  const matchesArea = activeAreaIds.size === 0 || activeAreaIds.has(getStationArea(station, country).id);
   const matchesOperator = activeOperatorIds.size === 0 || hasProviderFilterId(station, activeOperatorIds);
   const matchesConnectorType =
     !activeConnectorTypeIds || activeConnectorTypeIds.size === 0 || hasConnectorTypeFilterId(station, activeConnectorTypeIds);
+  const matchesPrice = stationPassesPriceFilter(station, selectedFilters);
 
-  return matchesAvailability && matchesSpeed && matchesArea && matchesOperator && matchesConnectorType;
+  return matchesAvailability && matchesSpeed && matchesArea && matchesOperator && matchesConnectorType && matchesPrice;
+}
+
+function stationMatchesPrimaryAvailability(station, country = "sg") {
+  if (country === "my") return station.lifecycleStatus === "existing" || station.availableCount > 0;
+  return station.availableCount > 0;
+}
+
+function stationPassesPriceFilter(station, selectedFilters) {
+  const price = getStationPriceKwh(station);
+  const maxPrice = Number.parseFloat(selectedFilters.maxPriceKwh);
+  const hasMaxPrice = selectedFilters.maxPriceKwh !== "" && Number.isFinite(maxPrice);
+
+  if (price == null) return selectedFilters.includeUnknownPrices;
+  if (!hasMaxPrice) return true;
+
+  return price <= maxPrice;
+}
+
+function buildPriceStats(stations) {
+  const prices = stations.map(getStationPriceKwh).filter((price) => price != null);
+
+  return {
+    knownCount: prices.length,
+    min: prices.length > 0 ? Math.min(...prices) : null,
+    max: prices.length > 0 ? Math.max(...prices) : null,
+  };
+}
+
+function formatPriceAmount(value) {
+  if (!Number.isFinite(value)) return "";
+  return value.toFixed(2);
+}
+
+function formatStationAvailability(station) {
+  if (station.country === "my") {
+    if (station.lifecycleStatus === "existing") return `${formatCompactCount(station.availableCount)} existing`;
+    return `${formatCompactCount(station.totalCount)} proposed`;
+  }
+
+  return `${formatCompactCount(station.availableCount)} open`;
 }
 
 function toggleValue(values, value) {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 }
 
-function formatFeedTime(value) {
-  return `LTA DataMall updated at: ${formatFeedTimeValue(value)}`;
+function formatFeedTime(feed, countryConfig = COUNTRY_CONFIGS.sg) {
+  const value = feed.updatedAtLabel || formatFeedTimeValue(feed.updatedAt);
+  return `${countryConfig.feedPrefix} ${value}`;
 }
 
 function formatFeedTimeValue(value) {
@@ -1961,6 +2252,12 @@ function formatSourceTimestamp(value) {
   return `${day} ${month}, ${hour}.${minute}${dayPeriod} SGT`;
 }
 
+function getRefreshDelayMs(country = "sg", intervalMs = CLIENT_REFRESH_MS) {
+  if (country === "sg") return getMsUntilNextRefreshBoundary(Date.now(), intervalMs);
+
+  return intervalMs;
+}
+
 function getMsUntilNextRefreshBoundary(nowMs = Date.now(), intervalMs = CLIENT_REFRESH_MS) {
   const remainder = nowMs % intervalMs;
 
@@ -1988,7 +2285,9 @@ function uniqueProviderNames(providers) {
   });
 }
 
-function buildAreaFilterOptions(stations) {
+function buildAreaFilterOptions(stations, country = "sg") {
+  if (country === "my") return buildMalaysiaStateFilterOptions(stations);
+
   const areaStats = new Map(
     AREA_FILTERS.map((area) => [
       area.id,
@@ -2006,7 +2305,7 @@ function buildAreaFilterOptions(stations) {
   );
 
   stations.forEach((station) => {
-    const area = getStationArea(station);
+    const area = getStationArea(station, country);
     const existing = areaStats.get(area.id);
     if (!existing) return;
 
@@ -2016,6 +2315,35 @@ function buildAreaFilterOptions(stations) {
   });
 
   return AREA_FILTERS.map((area) => areaStats.get(area.id)).filter((area) => area.stationCount > 0);
+}
+
+function buildMalaysiaStateFilterOptions(stations) {
+  const areaStats = new Map();
+
+  stations.forEach((station) => {
+    const area = getStationArea(station, "my");
+    const existing = areaStats.get(area.id);
+
+    if (existing) {
+      existing.stationCount += 1;
+      existing.availableCount += station.availableCount;
+      existing.totalCount += station.totalCount;
+      return;
+    }
+
+    areaStats.set(area.id, {
+      id: `area:${area.id}`,
+      areaId: area.id,
+      label: area.label,
+      color: "#0f4c81",
+      textColor: "#ffffff",
+      stationCount: 1,
+      availableCount: station.availableCount,
+      totalCount: station.totalCount,
+    });
+  });
+
+  return [...areaStats.values()].sort((a, b) => b.availableCount - a.availableCount || a.label.localeCompare(b.label));
 }
 
 function buildOperatorFilterOptions(stations) {
@@ -2058,7 +2386,12 @@ function buildOperatorFilterOptions(stations) {
   });
 }
 
-function getStationArea(station) {
+function getStationArea(station, country = "sg") {
+  if (country === "my") {
+    const label = station.state || station.region || "Unknown state";
+    return { id: normalizeAreaFilterValue(label), label };
+  }
+
   const latDelta = station.latitude - AREA_CENTER.latitude;
   const lngDelta = station.longitude - AREA_CENTER.longitude;
   const centralLatSpan = 0.035;
@@ -2081,6 +2414,14 @@ function getStationArea(station) {
   }
 
   return lngDelta >= 0 ? { id: "east", label: "East" } : { id: "west", label: "West" };
+}
+
+function normalizeAreaFilterValue(value) {
+  return String(value || "unknown")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "unknown";
 }
 
 function hasProviderFilterId(station, operatorIds) {

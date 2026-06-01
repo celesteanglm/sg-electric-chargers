@@ -76,7 +76,7 @@ button {
 
 .top-panel {
   position: absolute;
-  z-index: 900;
+  z-index: 1100;
   top: max(16px, env(safe-area-inset-top));
   left: 18px;
   right: 18px;
@@ -115,6 +115,47 @@ button {
   border: 1px solid rgba(8, 40, 63, 0.1);
   border-radius: 8px;
   box-shadow: inset 0 -4px 0 rgba(8, 40, 63, 0.08);
+}
+
+.country-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.country-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex: 1 1 150px;
+  gap: 6px;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(8, 40, 63, 0.12);
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.country-flag {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 24px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.country-toggle-button.active {
+  background: var(--surface-warm);
+  border-color: rgba(8, 40, 63, 0.13);
+  box-shadow: inset 0 -2px 0 rgba(8, 40, 63, 0.1);
 }
 
 .brand-mark img {
@@ -449,6 +490,76 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.price-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+}
+
+.price-input {
+  display: grid;
+  gap: 4px;
+  min-width: 132px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.price-input small {
+  color: #7a6940;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.price-input input {
+  width: 132px;
+  height: 34px;
+  padding: 0 10px;
+  color: var(--text);
+  background: #ffffff;
+  border: 1px solid rgba(8, 40, 63, 0.16);
+  border-radius: 8px;
+  outline: 0;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.price-input input:disabled {
+  color: var(--muted);
+  background: #edf2f0;
+  cursor: not-allowed;
+}
+
+.price-input input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(8, 167, 216, 0.14);
+}
+
+.unknown-price-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.unknown-price-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--green);
+}
+
+.filter-note {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .filter-scroller {
@@ -907,70 +1018,45 @@ button {
   text-align: right;
 }
 
-.summary-strip {
-  display: grid;
+.compact-station-summary {
+  display: none;
+}
+
+.compact-station-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.compact-station-topline .provider-stack {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.compact-station-topline .status-pill {
   flex: 0 0 auto;
-  grid-template-columns: 1fr 1fr 1.35fr;
-  gap: 9px;
-  margin-bottom: 12px;
 }
 
-.stat-tile {
-  position: relative;
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 11px 10px 10px;
-  overflow: hidden;
-  background: #f8fcfa;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: inset 0 -3px 0 rgba(8, 40, 63, 0.04);
-}
-
-.stat-tile::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 4px;
-  background: var(--ink);
-}
-
-.stat-tile.green::before {
-  background: var(--green);
-}
-
-.stat-tile.blue::before {
-  background: var(--blue);
-}
-
-.stat-tile span {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.stat-tile strong {
+.compact-station-summary strong,
+.compact-station-summary > span {
   min-width: 0;
   overflow: hidden;
-  color: var(--text);
-  font-size: 16px;
-  line-height: 1.12;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.stat-tile.green strong {
-  color: var(--green-dark);
-}
-
-.stat-tile.blue strong {
-  color: var(--blue);
-}
-
-.stat-tile.dark strong {
+.compact-station-summary strong {
   color: var(--ink);
+  font-size: 15px;
+  line-height: 1.12;
+}
+
+.compact-station-summary > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .feed-warning {
@@ -1706,7 +1792,7 @@ button {
   }
 
   .filter-panel {
-    max-height: calc(100dvh - 310px - max(12px, env(safe-area-inset-bottom)));
+    max-height: calc(100dvh - 382px - max(12px, env(safe-area-inset-bottom)));
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: rgba(8, 40, 63, 0.18) transparent;
@@ -1757,7 +1843,7 @@ button {
   }
 
   .bottom-sheet.sheet-collapsed {
-    height: max(122px, calc(108px + env(safe-area-inset-bottom)));
+    height: max(164px, calc(150px + env(safe-area-inset-bottom)));
     padding-bottom: env(safe-area-inset-bottom);
     touch-action: none;
   }
@@ -1821,6 +1907,19 @@ button {
     overflow: hidden;
   }
 
+  .bottom-sheet.sheet-collapsed .compact-station-summary {
+    display: grid;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-width: 0;
+    margin: -2px 0 0;
+    padding: 9px 10px;
+    background: #f8fcfa;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: inset 0 -3px 0 rgba(8, 40, 63, 0.04);
+  }
+
   .bottom-sheet.sheet-collapsed .feed-warning,
   .bottom-sheet.sheet-collapsed .detail-card,
   .bottom-sheet.sheet-collapsed .nearby-header,
@@ -1834,6 +1933,10 @@ button {
     display: block;
   }
 
+  .bottom-sheet.is-dragging.sheet-collapsed .compact-station-summary {
+    display: none;
+  }
+
   .bottom-sheet.is-dragging.sheet-collapsed .detail-card {
     display: grid;
   }
@@ -1845,20 +1948,6 @@ button {
 
   .bottom-sheet.is-dragging.sheet-collapsed .station-list {
     display: grid;
-  }
-
-  .summary-strip {
-    grid-template-columns: 1.28fr 0.82fr 1.2fr;
-    flex: 0 0 auto;
-    gap: 7px;
-  }
-
-  .stat-tile {
-    padding: 8px;
-  }
-
-  .stat-tile strong {
-    font-size: 13px;
   }
 
   .detail-card {
@@ -1989,14 +2078,6 @@ button {
 
   .operator-chip {
     max-width: 168px;
-  }
-
-  .summary-strip {
-    grid-template-columns: 1.28fr 0.82fr 1.2fr;
-  }
-
-  .stat-tile span {
-    font-size: 10px;
   }
 
   .detail-grid {
