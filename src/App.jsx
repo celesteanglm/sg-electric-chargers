@@ -1040,8 +1040,20 @@ function StationDetail({ station }) {
   const plugTypeStats = getPlugTypeStats(station.chargers || []);
   const bestPlug = station.plugTypes[0];
 
-  const plugRows = station.plugTypes.map((plug, index) => {
-    const stats = plugTypeStats.get(`${plug.providerKey}|${plug.plugType}|${plug.chargingSpeed}|${plug.powerRating}`);
+  const providerOrder = new Map(providers.map((name, i) => [getProviderProfile(name).key, i]));
+  const sortedPlugTypes = [...station.plugTypes].sort((a, b) => {
+    const pa = providerOrder.get(a.providerKey) ?? Infinity;
+    const pb = providerOrder.get(b.providerKey) ?? Infinity;
+    if (pa !== pb) return pa - pb;
+    const sa = parseFloat(a.chargingSpeed) || 0;
+    const sb = parseFloat(b.chargingSpeed) || 0;
+    return sb - sa;
+  });
+
+  const plugRows = sortedPlugTypes.map((plug, index) => {
+    const stats = plugTypeStats.get(
+      `${plug.providerKey}|${plug.plugType}|${plug.chargingSpeed}|${plug.powerRating}`
+    );
     return (
       <div key={`${plug.plugType}-${plug.chargingSpeed}-${index}`} className="plug-row">
         {plug.provider ? <ProviderBadge providerName={plug.provider} compact /> : null}
