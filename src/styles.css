@@ -1350,6 +1350,23 @@ button {
   line-height: 1.35;
 }
 
+.share-manual {
+  display: grid;
+  gap: 8px;
+}
+
+.share-url-input {
+  width: 100%;
+  min-height: 42px;
+  padding: 10px 12px;
+  color: var(--ink);
+  background: #f7fbfa;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .nearby-header {
   display: flex;
   flex: 0 0 auto;

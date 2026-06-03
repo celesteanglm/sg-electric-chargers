@@ -209,6 +209,9 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
   const applyingLocationAreaFilter = useRef(false);
   const applyingSharedLocation = useRef(false);
   const pendingLocationSearchRef = useRef("");
+  const appliedSharedStationRef = useRef(null);
+  const relaxedSharedFiltersRef = useRef(null);
+  const pendingStationShareRef = useRef(null);
   const selectedCountryConfig = COUNTRY_CONFIGS[selectedCountry] || COUNTRY_CONFIGS.sg;
   const requestedMapLocation = useMemo(() => parseMapLocationSearch(locationSearch), [locationSearch]);
   const requestedSharedStationId = requestedMapLocation.stationId;
@@ -521,6 +524,11 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
   }, [requestedSharedStationId]);
 
   useEffect(() => {
+    appliedSharedStationRef.current = null;
+    relaxedSharedFiltersRef.current = null;
+  }, [requestedSharedStationId]);
+
+  useEffect(() => {
     const normalizedLocationSearch = normalizeLocationSearch(locationSearch);
     if (pendingLocationSearchRef.current && pendingLocationSearchRef.current === normalizedLocationSearch) {
       pendingLocationSearchRef.current = "";
@@ -560,6 +568,8 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
   const visibleRankedStations = rankedStations.slice(pageStart, pageEnd);
   const firstVisibleStation = visibleRankedStations[0]?.station || null;
   const firstVisibleStationId = firstVisibleStation?.shareId || null;
+  const requestedSharedStation = requestedSharedStationId ? stations.find((station) => station.shareId === requestedSharedStationId) || null : null;
+  const requestedSharedStationVisible = requestedSharedStation ? filteredStations.some((station) => station.shareId === requestedSharedStation.shareId) : false;
   const hasUnresolvedSharedStation = Boolean(requestedSharedStationId) && stations.length > 0 && !stations.some((station) => station.shareId === requestedSharedStationId);
   const hasMultipleResultPages = pageCount > 1;
   const distanceSourceLabel = searchPlace ? searchPlace.label : userLocation ? "you" : "";
@@ -696,11 +706,10 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
       applyingSharedLocation.current = false;
       return;
     }
-
     setLocationNotice("");
     setSelectionMode("auto");
-    writeMapLocation(selectedCountry, null, "replace");
-  }, [query, selectedFilters, selectedCountry, writeMapLocation]);
+    setSelectionMode("auto");
+  }, [query, selectedFilters]);
 
   useEffect(() => {
     setResultPage(1);
@@ -726,18 +735,59 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
   }, [filteredStations, searchOrigin, selectedCountry, writeMapLocation]);
 
   const selectedStation =
-    filteredStations.length > 0
-      ? filteredStations.find((station) => station.shareId === selectedId) || (hasRequestedSharedStation ? null : firstVisibleStation)
-      : null;
+    stations.find((station) => station.shareId === selectedId) ||
+    (hasRequestedSharedStation ? requestedSharedStation : firstVisibleStation) ||
+    null;
 
   useEffect(() => {
-    if (filteredStations.length === 0) {
-      if (!hasRequestedSharedStation) setSelectedId(null);
+    if (!requestedSharedStationId || stations.length === 0 || !requestedSharedStation) return;
+
+    if (!requestedSharedStationVisible) {
+      if (relaxedSharedFiltersRef.current === requestedSharedStationId) return;
+
+      relaxedSharedFiltersRef.current = requestedSharedStationId;
+      applyingSharedLocation.current = true;
+      const nextFilters = createAllFilterState();
+      selectedFiltersRef.current = nextFilters;
+      setSelectedFilters(nextFilters);
+      setLocationNotice("Showing the shared station by clearing the current filters.");
       return;
     }
 
+    if (appliedSharedStationRef.current === requestedSharedStationId) return;
+
+    appliedSharedStationRef.current = requestedSharedStationId;
+    setSelectionMode("manual");
+    setSelectedId(requestedSharedStation.shareId);
+    setResultPage(1);
+    setSheetHasUserInteracted(true);
+    setSheetMode("expanded");
+    setLocationNotice("");
+    mapRef.current?.flyTo(
+      [requestedSharedStation.latitude, requestedSharedStation.longitude],
+      Math.max(mapRef.current.getZoom(), 14),
+      { duration: 0.35 },
+    );
+  }, [requestedSharedStation, requestedSharedStationId, requestedSharedStationVisible, stations.length]);
+
+  useEffect(() => {
+    if (selectionMode !== "manual" || !selectedStation || !selectedStation.shareId) return;
+    if (selectedStation.shareId === requestedSharedStationId && normalizeCountryId(requestedMapLocation.countryId) === selectedCountry) return;
+
+    writeMapLocation(selectedCountry, selectedStation.shareId, "push");
+  }, [requestedMapLocation.countryId, requestedSharedStationId, selectedCountry, selectedStation, selectionMode, writeMapLocation]);
+
+  useEffect(() => {
+    if (!selectedStation || !selectedStation.shareId) return;
+    if (pendingStationShareRef.current !== selectedStation.shareId) return;
+
+    pendingStationShareRef.current = null;
+    writeMapLocation(selectedCountry, selectedStation.shareId, "push");
+  }, [selectedCountry, selectedStation, writeMapLocation]);
+
+  useEffect(() => {
     setSelectedId((current) => {
-      if (current && filteredStations.some((station) => station.shareId === current)) {
+      if (current && stations.some((station) => station.shareId === current)) {
         return current;
       }
 
@@ -745,7 +795,7 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
 
       return firstVisibleStationId;
     });
-  }, [filteredStations, firstVisibleStationId, hasRequestedSharedStation, selectionMode]);
+  }, [firstVisibleStationId, hasRequestedSharedStation, selectionMode, stations]);
 
   const handleMapCenterChange = useCallback((nextCenter) => {
     setMapCenter((current) => (isSameMapCenter(current, nextCenter) ? current : nextCenter));
@@ -771,6 +821,7 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
   }
 
   const selectStation = useCallback((station) => {
+    pendingStationShareRef.current = station.shareId;
     setSelectionMode("manual");
     setSelectedId(station.shareId);
     setSheetHasUserInteracted(true);
@@ -1559,6 +1610,9 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
                   className={station.shareId === selectedStation?.shareId ? "station-row active" : "station-row"}
                   key={station.id}
                   type="button"
+                  onPointerDown={() => {
+                    pendingStationShareRef.current = station.shareId;
+                  }}
                   onClick={() => selectStation(station)}
                 >
                   <StatusDot status={station.status} />
@@ -1860,6 +1914,7 @@ function StationDetail({ station }) {
   const providerAppTarget = getProviderAppTarget(appProviderName);
   const bestPlug = station.plugTypes[0];
   const isMalaysia = station.country === "my";
+  const shareUrl = getStationShareUrl(station);
   const [shareState, setShareState] = useState("idle");
   const shareResetTimer = useRef(null);
 
@@ -1880,28 +1935,20 @@ function StationDetail({ station }) {
   );
 
   async function handleShareStation() {
-    const shareUrl = getStationShareUrl(station);
+    const shareResult = await shareStationLink({
+      title: `${station.name} · BoCharge`,
+      text: station.address,
+      url: shareUrl,
+    });
 
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: `${station.name} · BoCharge`,
-          text: station.address,
-          url: shareUrl,
-        });
-        setShareState("shared");
-      } else if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(shareUrl);
-        setShareState("copied");
-      } else {
-        throw new Error("Clipboard unavailable");
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      setShareState("error");
-    }
+    if (shareResult === "cancelled") return;
 
     if (shareResetTimer.current) window.clearTimeout(shareResetTimer.current);
+    shareResetTimer.current = null;
+    setShareState(shareResult);
+
+    if (shareResult === "manual") return;
+
     shareResetTimer.current = window.setTimeout(() => {
       setShareState("idle");
       shareResetTimer.current = null;
@@ -1966,8 +2013,8 @@ function StationDetail({ station }) {
             ? "Shared"
             : shareState === "copied"
               ? "Link copied"
-              : shareState === "error"
-                ? "Share failed"
+              : shareState === "manual"
+                ? "Copy link below"
                 : "Share station"}
         </button>
 
@@ -1987,7 +2034,19 @@ function StationDetail({ station }) {
         ) : null}
       </div>
 
-      {shareState === "error" ? <p className="action-feedback">Unable to share this station link in this browser.</p> : null}
+      {shareState === "manual" ? (
+        <div className="share-manual">
+          <p className="action-feedback">This browser could not open a share sheet. Copy the link below.</p>
+          <input
+            className="share-url-input"
+            type="text"
+            value={shareUrl}
+            readOnly
+            onFocus={(event) => event.currentTarget.select()}
+            aria-label="Shareable station link"
+          />
+        </div>
+      ) : null}
 
       <div className="connector-strip">
         {station.plugTypes.slice(0, 4).map((plug, index) => (
@@ -2202,6 +2261,67 @@ function getStationShareUrl(station) {
   url.searchParams.set("country", station.country || "sg");
   url.searchParams.set("station", station.shareId);
   return url.toString();
+}
+
+async function shareStationLink(shareData) {
+  const nativeShareResult = await tryNativeShare(shareData);
+  if (nativeShareResult === "shared" || nativeShareResult === "cancelled") return nativeShareResult;
+
+  const copied = await tryClipboardCopy(shareData.url);
+  return copied ? "copied" : "manual";
+}
+
+async function tryNativeShare(shareData) {
+  if (!navigator.share) return "unavailable";
+
+  try {
+    if (navigator.canShare && !navigator.canShare(shareData)) return "unavailable";
+    await navigator.share(shareData);
+    return "shared";
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return "cancelled";
+    return "unavailable";
+  }
+}
+
+async function tryClipboardCopy(value) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // Fall through to the legacy copy path.
+    }
+  }
+
+  return copyTextWithSelection(value);
+}
+
+function copyTextWithSelection(value) {
+  if (typeof document === "undefined") return false;
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textarea.value.length);
+
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+
+  document.body.removeChild(textarea);
+  return copied;
 }
 
 function getWindowLocationState() {
