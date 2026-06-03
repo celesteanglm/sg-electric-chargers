@@ -735,8 +735,8 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
   }, [filteredStations, searchOrigin, selectedCountry, writeMapLocation]);
 
   const selectedStation =
-    stations.find((station) => station.shareId === selectedId) ||
-    (hasRequestedSharedStation ? requestedSharedStation : firstVisibleStation) ||
+    filteredStations.find((station) => station.shareId === selectedId) ||
+    firstVisibleStation ||
     null;
 
   useEffect(() => {
@@ -787,15 +787,9 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
 
   useEffect(() => {
     setSelectedId((current) => {
-      if (current && stations.some((station) => station.shareId === current)) {
-        return current;
-      }
-
-      if (selectionMode === "manual" && current && hasRequestedSharedStation) return current;
-
       return firstVisibleStationId;
     });
-  }, [firstVisibleStationId, hasRequestedSharedStation, selectionMode, stations]);
+  }, [firstVisibleStationId, filteredStations]);
 
   const handleMapCenterChange = useCallback((nextCenter) => {
     setMapCenter((current) => (isSameMapCenter(current, nextCenter) ? current : nextCenter));
