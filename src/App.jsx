@@ -220,9 +220,9 @@ function ChargerMapPage({ onNavigate }) {
       all: stations.length,
       available: stations.filter((station) => stationMatchesPrimaryAvailability(station, selectedCountry)).length,
       fast: stations.filter((station) => station.maxPowerKw >= 43).length,
-      favorites: stations.filter((station) => favorites.isFavorite(station.id, selectedCountry)).length,
+      favorites: stations.filter((station) => favorites && `${selectedCountry}:${station.id}` in favorites.favorites).length,
     }),
-    [selectedCountry, stations, favorites],
+    [selectedCountry, stations, favorites?.favorites],
   );
   const quickFilters = useMemo(
     () =>
@@ -436,9 +436,9 @@ function ChargerMapPage({ onNavigate }) {
   const filteredStations = useMemo(
     () =>
       searchCandidates.filter((station) =>
-        stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, selectedCountry, favorites),
+        stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, selectedCountry, favorites?.favorites),
       ),
-    [activeAreaIds, activeConnectorTypeIds, activeOperatorIds, searchCandidates, selectedCountry, selectedFilters, favorites],
+    [activeAreaIds, activeConnectorTypeIds, activeOperatorIds, searchCandidates, selectedCountry, selectedFilters, favorites?.favorites],
   );
 
   // Viewport culling — only render markers visible on the map (with padding buffer)
@@ -1777,7 +1777,7 @@ function StationDetail({ station, favorites, selectedCountry }) {
   const providerAppTarget = getProviderAppTarget(appProviderName);
   const bestPlug = station.plugTypes[0];
   const isMalaysia = station.country === "my";
-  const isFavorited = favorites?.isFavorite(station.id, selectedCountry || station.country);
+  const isFavorited = favorites && `${selectedCountry || station.country}:${station.id}` in favorites.favorites;
 
   return (
     <article className="detail-card">
@@ -1791,12 +1791,14 @@ function StationDetail({ station, favorites, selectedCountry }) {
           <p>{station.address}</p>
         </div>
         {favorites && (
-          <FavoriteButton
-            isFavorited={isFavorited}
-            onClick={() => favorites.toggleFavorite(station.id, selectedCountry || station.country, station)}
-          />
-        )}
-      </div>
+         <div className="detail-favorite-button">
+           <FavoriteButton
+             isFavorited={isFavorited}
+             onClick={() => favorites.toggleFavorite(station.id, selectedCountry || station.country, station)}
+           />
+         </div>
+       )}
+     </div>
 
       <div className="detail-grid">
         <Metric label={isMalaysia ? "Existing bays" : "Open plugs"} value={`${station.availableCount}/${station.totalCount}`} />
@@ -2149,10 +2151,10 @@ function hasActiveFilters(filters) {
   );
 }
 
-function stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, country = "sg", favorites = null) {
+function stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, country = "sg", favoritesData = null) {
   const matchesAvailability = !selectedFilters.availableOnly || stationMatchesPrimaryAvailability(station, country);
   const matchesSpeed = !selectedFilters.fastOnly || station.maxPowerKw >= 43;
-  const matchesFavorites = !selectedFilters.favoritesOnly || (favorites && favorites.isFavorite(station.id, country));
+  const matchesFavorites = !selectedFilters.favoritesOnly || (favoritesData && `${country}:${station.id}` in favoritesData);
   const matchesArea = activeAreaIds.size === 0 || activeAreaIds.has(getStationArea(station, country).id);
   const matchesOperator = activeOperatorIds.size === 0 || hasProviderFilterId(station, activeOperatorIds);
   const matchesConnectorType =
