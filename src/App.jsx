@@ -1769,8 +1769,10 @@ function StationDetail({ station }) {
   const appProviderName = providers.find((providerName) => canOpenProviderApp(providerName)) || station.provider;
   const providerProfile = getProviderProfile(appProviderName);
   const providerAppTarget = getProviderAppTarget(appProviderName);
-  const bestPlug = station.plugTypes[0];
+  const bestPlug = getPrimaryStationPlug(station);
   const isMalaysia = station.country === "my";
+  const speedLabel = isMalaysia ? `${station.acCount || 0}/${station.dcCount || 0}` : formatStationSpeedRange(station);
+  const plugLabel = isMalaysia ? station.availabilityLabel || "TBC" : formatStationPlugTypes(station);
 
   return (
     <article className="detail-card">
@@ -1787,11 +1789,8 @@ function StationDetail({ station }) {
 
       <div className="detail-grid">
         <Metric label={isMalaysia ? "Existing bays" : "Open plugs"} value={`${station.availableCount}/${station.totalCount}`} />
-        <Metric
-          label={isMalaysia ? "AC/DC" : "Max speed"}
-          value={isMalaysia ? `${station.acCount || 0}/${station.dcCount || 0}` : station.maxPowerKw ? `${station.maxPowerKw} kW` : "TBC"}
-        />
-        <Metric label={isMalaysia ? "Status" : "Plug"} value={isMalaysia ? station.availabilityLabel || "TBC" : bestPlug?.plugType || "TBC"} />
+        <Metric label={isMalaysia ? "AC/DC" : "Speed range"} value={speedLabel} />
+        <Metric label={isMalaysia ? "Status" : "Plugs"} value={plugLabel} />
       </div>
 
       <div className="detail-meta">
@@ -1976,9 +1975,7 @@ function CompactStationSummary({ station }) {
         : "Price TBC";
   const speedLabel = isMalaysia
     ? `${station.acCount || 0} AC / ${station.dcCount || 0} DC`
-    : station.maxPowerKw
-      ? `${station.maxPowerKw} kW`
-      : station.plugTypes[0]?.plugType || "Plug TBC";
+    : formatStationSpeedRange(station);
   const countLabel = isMalaysia
     ? formatStationAvailability(station)
     : `${formatCompactCount(station.availableCount)}/${formatCompactCount(station.totalCount)} open`;
@@ -2184,6 +2181,51 @@ function formatStationAvailability(station) {
   }
 
   return `${formatCompactCount(station.availableCount)} open`;
+}
+
+function getPrimaryStationPlug(station) {
+  const plugs = toArray(station?.plugTypes);
+  return plugs.find((plug) => cleanText(plug?.price)) || plugs[0] || null;
+}
+
+function formatStationSpeedRange(station) {
+  const speeds = toArray(station?.plugTypes)
+    .map((plug) => Number.parseFloat(plug?.chargingSpeed))
+    .filter((speed) => Number.isFinite(speed) && speed > 0);
+  if (speeds.length === 0) return "TBC";
+
+  const minSpeed = Math.min(...speeds);
+  const maxSpeed = Math.max(...speeds);
+  if (minSpeed === maxSpeed) return `${formatPowerKw(minSpeed)} kW`;
+  return `${formatPowerKw(minSpeed)}-${formatPowerKw(maxSpeed)} kW`;
+}
+
+function formatStationPlugTypes(station, visibleCount = 2) {
+  const uniquePlugs = [];
+  const seen = new Set();
+
+  toArray(station?.plugTypes).forEach((plug) => {
+    const label = formatConnectorTypeLabel(plug?.plugType);
+    const normalized = normalizeConnectorTypeValue(label);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    uniquePlugs.push(label);
+  });
+
+  if (uniquePlugs.length === 0) return "TBC";
+  if (uniquePlugs.length <= visibleCount) return uniquePlugs.join(" + ");
+  return `${uniquePlugs.slice(0, visibleCount).join(" + ")} +${uniquePlugs.length - visibleCount}`;
+}
+
+function formatPowerKw(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "";
+  if (Number.isInteger(numeric)) return String(numeric);
+  return numeric.toFixed(1).replace(/\.0$/, "");
+}
+
+function cleanText(value) {
+  return String(value || "").trim();
 }
 
 function toggleValue(values, value) {
