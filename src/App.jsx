@@ -539,7 +539,7 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
     const nextStationId = requestedMapLocation.stationId;
     const nextSelectionMode = nextStationId ? "manual" : "auto";
 
-    if (nextCountry === selectedCountry && nextStationId === selectedId && nextSelectionMode === selectionMode) return;
+    if (nextCountry === selectedCountry && nextStationId === requestedMapLocation.stationId) return;
 
     applyingSharedLocation.current = true;
     resetCountryView(nextCountry, {
@@ -547,7 +547,7 @@ function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
       nextSelectionMode,
       expandSheet: Boolean(nextStationId),
     });
-  }, [locationSearch, requestedMapLocation, resetCountryView, selectedCountry, selectedId, selectionMode]);
+  }, [locationSearch, requestedMapLocation, resetCountryView, selectedCountry]);
 
   const hiddenSearchMatchCount = searchQuery.active ? Math.max(0, searchCandidates.length - filteredStations.length) : 0;
   const rankingOrigin = searchOrigin || userLocation || mapCenter;
