@@ -38,6 +38,7 @@ const CLIENT_REFRESH_MS = 5 * 60 * 1000;
 const MALAYSIA_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
 const SG_TIME_ZONE = "Asia/Singapore";
 const FEEDBACK_EMAIL = "celeste@agents.world";
+const REPOSITORY_URL = "https://github.com/celesteanglm/sg-electric-chargers";
 const SHEET_DRAG_THRESHOLD_PX = 44;
 const SHEET_CONTENT_DRAG_THRESHOLD_PX = 6;
 const SHEET_VELOCITY_SAMPLE_MS = 140;
@@ -120,6 +121,21 @@ const SEARCH_PLACE_ICON = L.divIcon({
   iconSize: [26, 26],
   iconAnchor: [13, 13],
 });
+
+function GitHubMarkIcon({ size = 18 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M12 0.297a12 12 0 0 0-3.794 23.4c0.6 0.113 0.82-0.258 0.82-0.577 0-0.286-0.01-1.04-0.016-2.04-3.338 0.724-4.042-1.61-4.042-1.61-0.546-1.387-1.333-1.756-1.333-1.756-1.089-0.744 0.083-0.729 0.083-0.729 1.205 0.084 1.84 1.236 1.84 1.236 1.07 1.834 2.807 1.304 3.492 0.997 0.108-0.775 0.418-1.304 0.762-1.604-2.665-0.3-5.467-1.332-5.467-5.93 0-1.31 0.47-2.382 1.236-3.22-0.124-0.303-0.536-1.523 0.117-3.176 0 0 1.008-0.322 3.3 1.23a11.52 11.52 0 0 1 3.003-0.404c1.018 0.005 2.043 0.138 3.003 0.404 2.291-1.552 3.297-1.23 3.297-1.23 0.655 1.653 0.243 2.873 0.12 3.176 0.77 0.838 1.234 1.91 1.234 3.22 0 4.61-2.807 5.628-5.48 5.922 0.43 0.37 0.823 1.103 0.823 2.222 0 1.604-0.015 2.898-0.015 3.293 0 0.322 0.216 0.694 0.825 0.576A12.005 12.005 0 0 0 12 0.297z" />
+    </svg>
+  );
+}
 
 export default function App() {
   const [path, setPath] = useState(() => window.location.pathname);
@@ -1194,6 +1210,16 @@ function ChargerMapPage({ onNavigate }) {
               <button className="icon-button" type="button" onClick={() => onNavigate("/data")} aria-label="Data sources">
                 <Info size={19} />
               </button>
+              <a
+                className="icon-button"
+                href={REPOSITORY_URL}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open GitHub repository"
+                title="View source on GitHub"
+              >
+                <GitHubMarkIcon size={18} />
+              </a>
               <a className="icon-button feedback-button" href={feedbackHref} aria-label="Send feedback">
                 <Mail size={17} />
                 <span className="feedback-label">Feedback</span>
