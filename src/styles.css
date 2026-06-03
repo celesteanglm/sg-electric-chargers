@@ -1342,6 +1342,14 @@ button {
   line-height: 1.35;
 }
 
+.action-feedback {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .nearby-header {
   display: flex;
   flex: 0 0 auto;

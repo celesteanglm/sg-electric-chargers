@@ -167,14 +167,26 @@ function normalizeStationRecord(record, index) {
   );
   const name = cleanString(record.name || record.Name || record.address || record.Address || `Charging area ${index + 1}`);
   const address = cleanString(record.address || record.Address || name);
+  const postalCode = cleanString(record.postalCode || record.PostalCode || extractPostalCode(address));
   const priceKwh = getPriceKwh(plugTypes);
+  const sourceId = cleanString(record.locationId || record.LocationId || record.id || record.Id || "");
 
   return {
-    id: cleanString(record.locationId || record.LocationId || record.id || record.Id || `${latitude}-${longitude}-${index}`),
+    id: sourceId || `${latitude}-${longitude}-${index}`,
+    shareId: buildStationShareId({
+      country: "sg",
+      sourceId,
+      name,
+      address,
+      postalCode,
+      latitude,
+      longitude,
+      provider,
+    }),
     country: "sg",
     name,
     address,
-    postalCode: cleanString(record.postalCode || record.PostalCode || extractPostalCode(address)),
+    postalCode,
     latitude,
     longitude,
     provider,
@@ -227,9 +239,21 @@ function normalizeMevnetRecord(record, index) {
   const provider = providers[0] || "Unknown";
   const plugTypes = collectMevnetPlugTypes({ acCount, dcCount, provider });
   const address = [name, pbt, state, "Malaysia"].filter(Boolean).join(", ");
+  const sourceId = cleanString(attrs.objectid || attrs.ObjectId || attrs.bil || attrs.Bil || "");
 
   return {
-    id: cleanString(attrs.objectid || attrs.ObjectId || attrs.bil || attrs.Bil || `${latitude}-${longitude}-${index}`),
+    id: sourceId || `${latitude}-${longitude}-${index}`,
+    shareId: buildStationShareId({
+      country: "my",
+      sourceId,
+      name,
+      address,
+      latitude,
+      longitude,
+      provider,
+      state,
+      pbt,
+    }),
     country: "my",
     name,
     address,
@@ -564,6 +588,54 @@ function formatProviderLabel(providers) {
   if (providers.length === 2) return providers.join(" + ");
 
   return `${providers[0]} + ${providers.length - 1} more`;
+}
+
+function buildStationShareId({ country, sourceId, name, address, postalCode, latitude, longitude, provider, state, pbt }) {
+  const normalizedCountry = cleanString(country).toLowerCase() || "station";
+  const stableSourceId = cleanString(sourceId).toLowerCase();
+  const label = slugifyShareSegment(stableSourceId || name || address || postalCode || `${normalizedCountry}-station`);
+  const identityKey = stableSourceId
+    ? `${normalizedCountry}|source|${stableSourceId}`
+    : [
+        normalizedCountry,
+        cleanString(name).toLowerCase(),
+        cleanString(address).toLowerCase(),
+        cleanString(postalCode).toLowerCase(),
+        cleanString(provider).toLowerCase(),
+        cleanString(state).toLowerCase(),
+        cleanString(pbt).toLowerCase(),
+        formatShareCoordinate(latitude),
+        formatShareCoordinate(longitude),
+      ].join("|");
+
+  return `${normalizedCountry}-${label}-${hashShareIdentity(identityKey)}`;
+}
+
+function slugifyShareSegment(value) {
+  return (
+    cleanString(value)
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^\w\s-]+/g, " ")
+      .replace(/[\s_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "station"
+  );
+}
+
+function formatShareCoordinate(value) {
+  return Number.isFinite(value) ? value.toFixed(6) : "";
+}
+
+function hashShareIdentity(value) {
+  let hash = 2166136261;
+  const text = cleanString(value);
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(36);
 }
 
 function extractPostalCode(address) {

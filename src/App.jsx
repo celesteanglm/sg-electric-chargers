@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Filter,
   Info,
+  Link2,
   LocateFixed,
   Mail,
   MapPin,
@@ -122,11 +123,11 @@ const SEARCH_PLACE_ICON = L.divIcon({
 });
 
 export default function App() {
-  const [path, setPath] = useState(() => window.location.pathname);
+  const [location, setLocation] = useState(getWindowLocationState);
 
   useEffect(() => {
     function handlePopState() {
-      setPath(window.location.pathname);
+      setLocation(getWindowLocationState());
     }
 
     window.addEventListener("popstate", handlePopState);
@@ -134,29 +135,39 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  function navigate(nextPath) {
-    if (window.location.pathname === nextPath) return;
+  function updateLocation(nextPath, nextSearch = "", { replace = false } = {}) {
+    const normalizedSearch = normalizeLocationSearch(nextSearch);
 
-    window.history.pushState(null, "", nextPath);
-    setPath(nextPath);
+    if (window.location.pathname === nextPath && window.location.search === normalizedSearch) return;
+
+    window.history[replace ? "replaceState" : "pushState"](null, "", buildLocationHref(nextPath, normalizedSearch));
+    setLocation({
+      pathname: nextPath,
+      search: normalizedSearch,
+    });
+  }
+
+  function navigate(nextPath, options) {
+    updateLocation(nextPath, "", options);
   }
 
   useEffect(() => {
-    trackPageView(path);
-  }, [path]);
+    trackPageView(buildLocationHref(location.pathname, location.search));
+  }, [location]);
 
-  if (path === "/data") {
+  if (location.pathname === "/data") {
     return <DataInfoPage onNavigate={navigate} />;
   }
 
-  return <ChargerMapPage onNavigate={navigate} />;
+  return <ChargerMapPage locationSearch={location.search} onNavigate={navigate} onUpdateLocation={updateLocation} />;
 }
 
-function ChargerMapPage({ onNavigate }) {
-  const [selectedCountry, setSelectedCountry] = useState("sg");
+function ChargerMapPage({ locationSearch, onNavigate, onUpdateLocation }) {
+  const initialMapLocation = parseMapLocationSearch(locationSearch);
+  const [selectedCountry, setSelectedCountry] = useState(() => initialMapLocation.countryId || "sg");
   const [stations, setStations] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [selectionMode, setSelectionMode] = useState("auto");
+  const [selectedId, setSelectedId] = useState(() => initialMapLocation.stationId);
+  const [selectionMode, setSelectionMode] = useState(() => (initialMapLocation.stationId ? "manual" : "auto"));
   const [query, setQuery] = useState("");
   const [resolvedPlace, setResolvedPlace] = useState(null);
   const [placeSearchStatus, setPlaceSearchStatus] = useState("idle");
@@ -175,7 +186,7 @@ function ChargerMapPage({ onNavigate }) {
   const [userLocation, setUserLocation] = useState(null);
   const [userLocationAccuracy, setUserLocationAccuracy] = useState(null);
   const [isLocating, setIsLocating] = useState(false);
-  const [mapCenter, setMapCenter] = useState(SINGAPORE_CENTER);
+  const [mapCenter, setMapCenter] = useState(() => (COUNTRY_CONFIGS[initialMapLocation.countryId] || COUNTRY_CONFIGS.sg).center);
   const [mapBounds, setMapBounds] = useState(null);
   const [resultPage, setResultPage] = useState(1);
   const [locationNotice, setLocationNotice] = useState("");
@@ -196,7 +207,13 @@ function ChargerMapPage({ onNavigate }) {
   const searchCandidatesRef = useRef([]);
   const selectedFiltersRef = useRef(selectedFilters);
   const applyingLocationAreaFilter = useRef(false);
+  const applyingSharedLocation = useRef(false);
+  const pendingLocationSearchRef = useRef("");
   const selectedCountryConfig = COUNTRY_CONFIGS[selectedCountry] || COUNTRY_CONFIGS.sg;
+  const requestedMapLocation = useMemo(() => parseMapLocationSearch(locationSearch), [locationSearch]);
+  const requestedSharedStationId = requestedMapLocation.stationId;
+  const requestedSharedStationIdRef = useRef(requestedSharedStationId);
+  const hasRequestedSharedStation = Boolean(requestedSharedStationId);
   const areaFilters = useMemo(() => buildAreaFilterOptions(stations, selectedCountry), [selectedCountry, stations]);
   const operatorFilters = useMemo(() => buildOperatorFilterOptions(stations), [stations]);
   const connectorTypeFilters = useMemo(() => buildConnectorTypeFilterOptions(stations), [stations]);
@@ -226,14 +243,57 @@ function ChargerMapPage({ onNavigate }) {
     [selectedCountry, selectedCountryConfig.availabilityFilterLabel],
   );
 
+  const writeMapLocation = useCallback(
+    (countryId, stationId, historyMode = "replace") => {
+      const params = new URLSearchParams(locationSearch);
+      params.set("country", countryId);
+      if (stationId) {
+        params.set("station", stationId);
+      } else {
+        params.delete("station");
+      }
+
+      const nextSearch = buildSearchFromParams(params);
+      if (nextSearch === normalizeLocationSearch(locationSearch)) return;
+
+      pendingLocationSearchRef.current = nextSearch;
+      onUpdateLocation("/", nextSearch, { replace: historyMode !== "push" });
+    },
+    [locationSearch, onUpdateLocation],
+  );
+
+  const resetCountryView = useCallback((countryId, { selectedStationId = null, nextSelectionMode = "auto", expandSheet = false } = {}) => {
+    if (!COUNTRY_CONFIGS[countryId]) return;
+
+    stopLocationWatch();
+    setSelectedCountry(countryId);
+    setQuery("");
+    setResolvedPlace(null);
+    setPlaceSearchStatus("idle");
+    setPlaceSearchWarning("");
+    const nextFilters = createDefaultFilterState(countryId);
+    setSelectedFilters(nextFilters);
+    selectedFiltersRef.current = nextFilters;
+    setSelectedId(selectedStationId);
+    setSelectionMode(nextSelectionMode);
+    setUserLocation(null);
+    setUserLocationAccuracy(null);
+    setMapBounds(null);
+    setMapCenter(COUNTRY_CONFIGS[countryId].center);
+    setResultPage(1);
+    setLocationNotice("");
+    if (expandSheet) {
+      setSheetHasUserInteracted(true);
+      setSheetMode("expanded");
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
     let inFlight = false;
     let refreshTimer = null;
     const countryConfig = COUNTRY_CONFIGS[selectedCountry] || COUNTRY_CONFIGS.sg;
-
     setStations([]);
-    setSelectedId(null);
     setFeed({
       loading: true,
       sourceLabel: "Loading",
@@ -259,7 +319,9 @@ function ChargerMapPage({ onNavigate }) {
 
         setStations(nextStations);
         setSelectedId((current) =>
-          current && nextStations.some((station) => station.id === current) ? current : null,
+          current && (current === requestedSharedStationIdRef.current || nextStations.some((station) => station.shareId === current))
+            ? current
+            : null,
         );
         setFeed({
           loading: false,
@@ -298,7 +360,9 @@ function ChargerMapPage({ onNavigate }) {
 
         setStations(nextStations);
         setSelectedId((current) =>
-          current && nextStations.some((station) => station.id === current) ? current : null,
+          current && (current === requestedSharedStationIdRef.current || nextStations.some((station) => station.shareId === current))
+            ? current
+            : null,
         );
         setFeed({
           loading: false,
@@ -452,6 +516,31 @@ function ChargerMapPage({ onNavigate }) {
     selectedFiltersRef.current = selectedFilters;
   }, [selectedFilters]);
 
+  useEffect(() => {
+    requestedSharedStationIdRef.current = requestedSharedStationId;
+  }, [requestedSharedStationId]);
+
+  useEffect(() => {
+    const normalizedLocationSearch = normalizeLocationSearch(locationSearch);
+    if (pendingLocationSearchRef.current && pendingLocationSearchRef.current === normalizedLocationSearch) {
+      pendingLocationSearchRef.current = "";
+      return;
+    }
+
+    const nextCountry = requestedMapLocation.countryId || "sg";
+    const nextStationId = requestedMapLocation.stationId;
+    const nextSelectionMode = nextStationId ? "manual" : "auto";
+
+    if (nextCountry === selectedCountry && nextStationId === selectedId && nextSelectionMode === selectionMode) return;
+
+    applyingSharedLocation.current = true;
+    resetCountryView(nextCountry, {
+      selectedStationId: nextStationId,
+      nextSelectionMode,
+      expandSheet: Boolean(nextStationId),
+    });
+  }, [locationSearch, requestedMapLocation, resetCountryView, selectedCountry, selectedId, selectionMode]);
+
   const hiddenSearchMatchCount = searchQuery.active ? Math.max(0, searchCandidates.length - filteredStations.length) : 0;
   const rankingOrigin = searchOrigin || userLocation || mapCenter;
   const rankedStations = useMemo(
@@ -470,7 +559,8 @@ function ChargerMapPage({ onNavigate }) {
   const pageEnd = rankedStations.length > 0 ? Math.min(pageStart + RESULT_PAGE_SIZE, rankedStations.length) : 0;
   const visibleRankedStations = rankedStations.slice(pageStart, pageEnd);
   const firstVisibleStation = visibleRankedStations[0]?.station || null;
-  const firstVisibleStationId = firstVisibleStation?.id || null;
+  const firstVisibleStationId = firstVisibleStation?.shareId || null;
+  const hasUnresolvedSharedStation = Boolean(requestedSharedStationId) && stations.length > 0 && !stations.some((station) => station.shareId === requestedSharedStationId);
   const hasMultipleResultPages = pageCount > 1;
   const distanceSourceLabel = searchPlace ? searchPlace.label : userLocation ? "you" : "";
   const resultRangeLabel =
@@ -602,9 +692,15 @@ function ChargerMapPage({ onNavigate }) {
       return;
     }
 
+    if (applyingSharedLocation.current) {
+      applyingSharedLocation.current = false;
+      return;
+    }
+
     setLocationNotice("");
     setSelectionMode("auto");
-  }, [query, selectedFilters]);
+    writeMapLocation(selectedCountry, null, "replace");
+  }, [query, selectedFilters, selectedCountry, writeMapLocation]);
 
   useEffect(() => {
     setResultPage(1);
@@ -622,31 +718,34 @@ function ChargerMapPage({ onNavigate }) {
 
     setSheetHasUserInteracted(true);
     setSelectionMode("auto");
-    setSelectedId(nearestStation.id);
+    setSelectedId(nearestStation.shareId);
     setResultPage(1);
     setSheetMode("expanded");
+    writeMapLocation(selectedCountry, null, "replace");
     zoomToLocationAndStation(mapRef.current, searchOrigin, nearestStation);
-  }, [filteredStations, searchOrigin]);
+  }, [filteredStations, searchOrigin, selectedCountry, writeMapLocation]);
 
   const selectedStation =
     filteredStations.length > 0
-      ? filteredStations.find((station) => station.id === selectedId) || firstVisibleStation
+      ? filteredStations.find((station) => station.shareId === selectedId) || (hasRequestedSharedStation ? null : firstVisibleStation)
       : null;
 
   useEffect(() => {
     if (filteredStations.length === 0) {
-      setSelectedId(null);
+      if (!hasRequestedSharedStation) setSelectedId(null);
       return;
     }
 
     setSelectedId((current) => {
-      if (selectionMode === "manual" && current && filteredStations.some((station) => station.id === current)) {
+      if (current && filteredStations.some((station) => station.shareId === current)) {
         return current;
       }
 
+      if (selectionMode === "manual" && current && hasRequestedSharedStation) return current;
+
       return firstVisibleStationId;
     });
-  }, [filteredStations, firstVisibleStationId, selectionMode]);
+  }, [filteredStations, firstVisibleStationId, hasRequestedSharedStation, selectionMode]);
 
   const handleMapCenterChange = useCallback((nextCenter) => {
     setMapCenter((current) => (isSameMapCenter(current, nextCenter) ? current : nextCenter));
@@ -667,33 +766,20 @@ function ChargerMapPage({ onNavigate }) {
   function handleCountryChange(countryId) {
     if (countryId === selectedCountry || !COUNTRY_CONFIGS[countryId]) return;
 
-    stopLocationWatch();
-    setSelectedCountry(countryId);
-    setQuery("");
-    setResolvedPlace(null);
-    setPlaceSearchStatus("idle");
-    setPlaceSearchWarning("");
-    setSelectedFilters(createDefaultFilterState(countryId));
-    selectedFiltersRef.current = createDefaultFilterState(countryId);
-    setSelectedId(null);
-    setSelectionMode("auto");
-    setUserLocation(null);
-    setUserLocationAccuracy(null);
-    setMapBounds(null);
-    setMapCenter(COUNTRY_CONFIGS[countryId].center);
-    setResultPage(1);
-    setLocationNotice("");
+    resetCountryView(countryId);
+    writeMapLocation(countryId, null, "replace");
   }
 
   const selectStation = useCallback((station) => {
     setSelectionMode("manual");
-    setSelectedId(station.id);
+    setSelectedId(station.shareId);
     setSheetHasUserInteracted(true);
     setSheetMode("expanded");
+    writeMapLocation(selectedCountry, station.shareId, "push");
     mapRef.current?.flyTo([station.latitude, station.longitude], Math.max(mapRef.current.getZoom(), 14), {
       duration: 0.35,
     });
-  }, [mapRef]);
+  }, [mapRef, selectedCountry, writeMapLocation]);
 
   const handleResultPageChange = useCallback((nextPage) => {
     const clampedPage = Math.min(Math.max(nextPage, 1), pageCount);
@@ -703,9 +789,10 @@ function ChargerMapPage({ onNavigate }) {
 
     if (firstStationOnPage) {
       setSelectionMode("auto");
-      setSelectedId(firstStationOnPage.id);
+      setSelectedId(firstStationOnPage.shareId);
+      writeMapLocation(selectedCountry, null, "replace");
     }
-  }, [pageCount, rankedStations]);
+  }, [pageCount, rankedStations, selectedCountry, writeMapLocation]);
 
   function handleLocateMe() {
     if (isLocating) return;
@@ -787,10 +874,11 @@ function ChargerMapPage({ onNavigate }) {
     if (!focusNearest) return;
 
     setSelectionMode("auto");
-    setSelectedId(nearestStation.id);
+    setSelectedId(nearestStation.shareId);
     setResultPage(1);
     setSheetHasUserInteracted(true);
     setSheetMode("expanded");
+    writeMapLocation(selectedCountry, null, "replace");
     setLocationNotice(
       [
         areaFilterChanged && locationArea ? `Switched area filter to ${locationArea.label}.` : "",
@@ -1386,7 +1474,7 @@ function ChargerMapPage({ onNavigate }) {
           />
           <ClusterLayer
             stations={viewportStations}
-            selectedStationId={selectedStation?.id}
+            selectedStationId={selectedStation?.shareId}
             onSelectStation={selectStation}
           />
           {userLocation ? (
@@ -1434,6 +1522,7 @@ function ChargerMapPage({ onNavigate }) {
 
           {selectedStation ? <CompactStationSummary station={selectedStation} /> : null}
 
+          {hasUnresolvedSharedStation ? <div className="feed-warning">This shared station link no longer matches the latest feed.</div> : null}
           {feed.warning ? <div className="feed-warning">{feed.warning}</div> : null}
 
           {selectedStation ? (
@@ -1467,7 +1556,7 @@ function ChargerMapPage({ onNavigate }) {
 
               return (
                 <button
-                  className={station.id === selectedStation?.id ? "station-row active" : "station-row"}
+                  className={station.shareId === selectedStation?.shareId ? "station-row active" : "station-row"}
                   key={station.id}
                   type="button"
                   onClick={() => selectStation(station)}
@@ -1750,7 +1839,7 @@ function ClusterLayer({ stations, selectedStationId, onSelectStation }) {
 
     const markers = stations.map((station) => {
       const marker = L.marker([station.latitude, station.longitude], {
-        icon: createStationIcon(station, station.id === selectedStationId),
+        icon: createStationIcon(station, station.shareId === selectedStationId),
       });
       marker.on("click", () => onSelectStation(station));
       return marker;
@@ -1771,6 +1860,53 @@ function StationDetail({ station }) {
   const providerAppTarget = getProviderAppTarget(appProviderName);
   const bestPlug = station.plugTypes[0];
   const isMalaysia = station.country === "my";
+  const [shareState, setShareState] = useState("idle");
+  const shareResetTimer = useRef(null);
+
+  useEffect(() => {
+    setShareState("idle");
+    if (!shareResetTimer.current) return undefined;
+
+    window.clearTimeout(shareResetTimer.current);
+    shareResetTimer.current = null;
+    return undefined;
+  }, [station.shareId]);
+
+  useEffect(
+    () => () => {
+      if (shareResetTimer.current) window.clearTimeout(shareResetTimer.current);
+    },
+    [],
+  );
+
+  async function handleShareStation() {
+    const shareUrl = getStationShareUrl(station);
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `${station.name} · BoCharge`,
+          text: station.address,
+          url: shareUrl,
+        });
+        setShareState("shared");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+        setShareState("copied");
+      } else {
+        throw new Error("Clipboard unavailable");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setShareState("error");
+    }
+
+    if (shareResetTimer.current) window.clearTimeout(shareResetTimer.current);
+    shareResetTimer.current = window.setTimeout(() => {
+      setShareState("idle");
+      shareResetTimer.current = null;
+    }, 2400);
+  }
 
   return (
     <article className="detail-card">
@@ -1824,6 +1960,17 @@ function StationDetail({ station }) {
           Open in Google Maps
         </a>
 
+        <button className="secondary-action" type="button" onClick={handleShareStation}>
+          <Link2 size={18} />
+          {shareState === "shared"
+            ? "Shared"
+            : shareState === "copied"
+              ? "Link copied"
+              : shareState === "error"
+                ? "Share failed"
+                : "Share station"}
+        </button>
+
         {!isMalaysia && providerAppTarget.available ? (
           <button className="secondary-action" type="button" onClick={() => openProviderApp(appProviderName)}>
             <ExternalLink size={18} />
@@ -1839,6 +1986,8 @@ function StationDetail({ station }) {
           </div>
         ) : null}
       </div>
+
+      {shareState === "error" ? <p className="action-feedback">Unable to share this station link in this browser.</p> : null}
 
       <div className="connector-strip">
         {station.plugTypes.slice(0, 4).map((plug, index) => (
@@ -2045,6 +2194,62 @@ function getGoogleMapsUrl(station) {
   const destination = encodeURIComponent(`${station.latitude},${station.longitude}`);
   const destinationName = encodeURIComponent(station.name || station.address || "EV charger");
   return `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving&dir_action=navigate&destination_name=${destinationName}`;
+}
+
+function getStationShareUrl(station) {
+  const url = new URL(window.location.href);
+  url.pathname = "/";
+  url.searchParams.set("country", station.country || "sg");
+  url.searchParams.set("station", station.shareId);
+  return url.toString();
+}
+
+function getWindowLocationState() {
+  return {
+    pathname: window.location.pathname || "/",
+    search: normalizeLocationSearch(window.location.search),
+  };
+}
+
+function buildLocationHref(pathname, search = "") {
+  return `${pathname}${normalizeLocationSearch(search)}`;
+}
+
+function buildSearchFromParams(params) {
+  const value = params.toString();
+  return value ? `?${value}` : "";
+}
+
+function normalizeLocationSearch(search) {
+  const value = String(search || "").trim();
+  if (!value) return "";
+  return value.startsWith("?") ? value : `?${value}`;
+}
+
+function parseMapLocationSearch(search) {
+  const params = new URLSearchParams(search);
+  const stationId = normalizeSearchParam(params.get("station"));
+  return {
+    countryId: normalizeCountryId(params.get("country")) || inferCountryIdFromStationId(stationId),
+    stationId,
+  };
+}
+
+function inferCountryIdFromStationId(stationId) {
+  if (!stationId) return null;
+  if (stationId.startsWith("sg-")) return "sg";
+  if (stationId.startsWith("my-")) return "my";
+  return null;
+}
+
+function normalizeCountryId(value) {
+  const countryId = String(value || "").trim().toLowerCase();
+  return COUNTRY_CONFIGS[countryId] ? countryId : null;
+}
+
+function normalizeSearchParam(value) {
+  const normalized = String(value || "").trim();
+  return normalized || null;
 }
 
 function getFeedbackMailto({ filterLabel, query, visibleCount }) {
