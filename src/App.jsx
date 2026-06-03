@@ -14,6 +14,7 @@ import {
   Clock,
   ExternalLink,
   Filter,
+  Heart,
   Info,
   LocateFixed,
   Mail,
@@ -28,6 +29,8 @@ import { getStationPriceKwh, normalizeChargerStations } from "./lib/chargers.js"
 import { trackPageView } from "./lib/analytics.js";
 import { PLACE_SEARCH_RADIUS_METERS, buildSearchQuery, rankStationSearchMatches } from "./lib/search.js";
 import { canOpenProviderApp, getProviderAppTarget, getProviderProfile, openProviderApp } from "./data/providerApps.js";
+import { useFavorites } from "./lib/useFavorites.js";
+import { FavoriteButton } from "./components/FavoriteButton.jsx";
 
 const SINGAPORE_CENTER = [1.3521, 103.8198];
 const MALAYSIA_CENTER = [4.2105, 101.9758];
@@ -101,6 +104,7 @@ const QUICK_FILTERS = [
     textColor: "#073825",
   },
   { id: "fast", stateKey: "fastOnly", label: "Fast", Icon: PlugZap, color: "#08a7d8", textColor: "#06283a" },
+  { id: "favorites", stateKey: "favoritesOnly", label: "Favorites", Icon: Heart, color: "#ec4899", textColor: "#ffffff" },
 ];
 
 // Module-level icon cache keyed by the marker content that affects rendering.
@@ -182,6 +186,7 @@ function ChargerMapPage({ onNavigate }) {
   const [sheetMode, setSheetMode] = useState(getInitialSheetMode);
   const [sheetHasUserInteracted, setSheetHasUserInteracted] = useState(false);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const favorites = useFavorites();
   const filterBarRef = useRef(null);
   const mapRef = useRef(null);
   const sheetRef = useRef(null);
@@ -215,8 +220,9 @@ function ChargerMapPage({ onNavigate }) {
       all: stations.length,
       available: stations.filter((station) => stationMatchesPrimaryAvailability(station, selectedCountry)).length,
       fast: stations.filter((station) => station.maxPowerKw >= 43).length,
+      favorites: stations.filter((station) => favorites.isFavorite(station.id, selectedCountry)).length,
     }),
-    [selectedCountry, stations],
+    [selectedCountry, stations, favorites],
   );
   const quickFilters = useMemo(
     () =>
@@ -430,9 +436,9 @@ function ChargerMapPage({ onNavigate }) {
   const filteredStations = useMemo(
     () =>
       searchCandidates.filter((station) =>
-        stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, selectedCountry),
+        stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, selectedCountry, favorites),
       ),
-    [activeAreaIds, activeConnectorTypeIds, activeOperatorIds, searchCandidates, selectedCountry, selectedFilters],
+    [activeAreaIds, activeConnectorTypeIds, activeOperatorIds, searchCandidates, selectedCountry, selectedFilters, favorites],
   );
 
   // Viewport culling — only render markers visible on the map (with padding buffer)
@@ -1437,7 +1443,7 @@ function ChargerMapPage({ onNavigate }) {
           {feed.warning ? <div className="feed-warning">{feed.warning}</div> : null}
 
           {selectedStation ? (
-            <StationDetail station={selectedStation} />
+            <StationDetail station={selectedStation} favorites={favorites} selectedCountry={selectedCountry} />
           ) : (
             <div className="empty-state">
               <CircleDot size={22} />
@@ -1764,13 +1770,14 @@ function ClusterLayer({ stations, selectedStationId, onSelectStation }) {
   return null;
 }
 
-function StationDetail({ station }) {
+function StationDetail({ station, favorites, selectedCountry }) {
   const providers = station.providers?.length ? station.providers : [station.provider];
   const appProviderName = providers.find((providerName) => canOpenProviderApp(providerName)) || station.provider;
   const providerProfile = getProviderProfile(appProviderName);
   const providerAppTarget = getProviderAppTarget(appProviderName);
   const bestPlug = station.plugTypes[0];
   const isMalaysia = station.country === "my";
+  const isFavorited = favorites?.isFavorite(station.id, selectedCountry || station.country);
 
   return (
     <article className="detail-card">
@@ -1783,6 +1790,12 @@ function StationDetail({ station }) {
           <h2>{station.name}</h2>
           <p>{station.address}</p>
         </div>
+        {favorites && (
+          <FavoriteButton
+            isFavorited={isFavorited}
+            onClick={() => favorites.toggleFavorite(station.id, selectedCountry || station.country, station)}
+          />
+        )}
       </div>
 
       <div className="detail-grid">
@@ -2093,6 +2106,7 @@ function createDefaultFilterState() {
   return {
     availableOnly: true,
     fastOnly: false,
+    favoritesOnly: false,
     areas: [],
     operators: [],
     connectorTypes: [],
@@ -2105,6 +2119,7 @@ function createAllFilterState() {
   return {
     availableOnly: false,
     fastOnly: false,
+    favoritesOnly: false,
     areas: [],
     operators: [],
     connectorTypes: [],
@@ -2134,16 +2149,17 @@ function hasActiveFilters(filters) {
   );
 }
 
-function stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, country = "sg") {
+function stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, country = "sg", favorites = null) {
   const matchesAvailability = !selectedFilters.availableOnly || stationMatchesPrimaryAvailability(station, country);
   const matchesSpeed = !selectedFilters.fastOnly || station.maxPowerKw >= 43;
+  const matchesFavorites = !selectedFilters.favoritesOnly || (favorites && favorites.isFavorite(station.id, country));
   const matchesArea = activeAreaIds.size === 0 || activeAreaIds.has(getStationArea(station, country).id);
   const matchesOperator = activeOperatorIds.size === 0 || hasProviderFilterId(station, activeOperatorIds);
   const matchesConnectorType =
     !activeConnectorTypeIds || activeConnectorTypeIds.size === 0 || hasConnectorTypeFilterId(station, activeConnectorTypeIds);
   const matchesPrice = stationPassesPriceFilter(station, selectedFilters);
 
-  return matchesAvailability && matchesSpeed && matchesArea && matchesOperator && matchesConnectorType && matchesPrice;
+  return matchesAvailability && matchesSpeed && matchesFavorites && matchesArea && matchesOperator && matchesConnectorType && matchesPrice;
 }
 
 function stationMatchesPrimaryAvailability(station, country = "sg") {
