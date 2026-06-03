@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an improvement for BoCharge.
+title: "Feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user need or operational gap would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the smallest useful version of the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: considerations
+    attributes:
+      label: Considerations
+      description: Data-source, privacy, UI, or deployment details to keep in mind.
