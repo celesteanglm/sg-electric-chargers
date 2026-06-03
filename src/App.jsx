@@ -2095,38 +2095,76 @@ function StatusPill({ status, label }) {
 }
 
 function createStationIcon(station, selected) {
-  const providerProfile = getProviderProfile(station.provider);
-  const unknownProviderKey =
-    providerProfile.key === "unknown" ? `${station.providerLabel || station.provider}-${station.providerInitials || ""}` : "";
-  const key = `${providerProfile.key}-${unknownProviderKey}-${station.status}-${selected ? 1 : 0}`;
+  const providerNames = uniqueProviderNames(station.providers?.length ? station.providers : [station.provider]);
+  const markerProviders = providerNames.map((providerName) => {
+    const profile = getProviderProfile(providerName);
+    return {
+      providerName,
+      profile,
+      label: getMarkerProviderLabel(providerName, profile),
+    };
+  });
+  const primaryMarkerProvider = markerProviders[0] || {
+    providerName: station.provider,
+    profile: getProviderProfile(station.provider),
+    label: getOperatorInitials(station.provider),
+  };
+  const providerCacheKey = markerProviders
+    .map(({ providerName, profile, label }) => `${providerName}:${profile.key}:${label}`)
+    .join("|");
+  const markerIdentity =
+    providerCacheKey || `${primaryMarkerProvider.providerName}:${primaryMarkerProvider.profile.key}:${primaryMarkerProvider.label}`;
+  const key = `${markerIdentity}-${station.status}-${selected ? 1 : 0}`;
   if (iconCache.has(key)) return iconCache.get(key);
 
+  const isMultiProvider = markerProviders.length > 1;
+  const visibleProviderSegments = Math.min(markerProviders.length, 2) + (markerProviders.length > 2 ? 1 : 0);
+  const segmentWidth = selected ? 20 : 15;
+  const iconHeight = selected ? (isMultiProvider ? 30 : 36) : isMultiProvider ? 24 : 28;
+  const iconWidth = isMultiProvider
+    ? Math.max(iconHeight + 8, visibleProviderSegments * segmentWidth + (selected ? 10 : 8))
+    : iconHeight;
   const className = [
     "pin",
-    `pin-provider-${providerProfile.key}`,
+    isMultiProvider ? "pin-pill" : "pin-single",
+    `pin-provider-${primaryMarkerProvider.profile.key}`,
     `pin-${station.status}`,
     selected ? "selected" : "",
   ].join(" ");
-  const label =
-    providerProfile.key === "unknown"
-      ? station.providerInitials || getOperatorInitials(station.provider)
-      : providerProfile.markerLabel || station.providerInitials || station.provider.slice(0, 2).toUpperCase();
-  const markerContent = providerProfile.logoSrc
-    ? `<img class="pin-logo pin-logo-${providerProfile.key}" src="${escapeAttribute(providerProfile.logoSrc)}" alt="" aria-hidden="true" />`
-    : `<span class="pin-label">${escapeHtml(label)}</span>`;
+  const markerContent = isMultiProvider
+    ? buildProviderPillMarkerContent(markerProviders)
+    : primaryMarkerProvider.profile.logoSrc
+      ? `<img class="pin-logo pin-logo-${primaryMarkerProvider.profile.key}" src="${escapeAttribute(primaryMarkerProvider.profile.logoSrc)}" alt="" aria-hidden="true" />`
+      : `<span class="pin-label">${escapeHtml(primaryMarkerProvider.label)}</span>`;
   const inlineStyle = [
-    `--provider-color: ${providerProfile.brandColor}`,
-    `--provider-text: ${providerProfile.brandTextColor}`,
+    `--provider-color: ${primaryMarkerProvider.profile.brandColor}`,
+    `--provider-text: ${primaryMarkerProvider.profile.brandTextColor}`,
   ].join("; ");
+  const markerTitle = providerNames.join(" + ") || station.providerLabel || primaryMarkerProvider.profile.shortName;
 
   const icon = L.divIcon({
     className: "station-marker",
-    html: `<span class="${className}" style="${inlineStyle}" title="${escapeAttribute(station.providerLabel || providerProfile.shortName)}">${markerContent}<span class="pin-status pin-status-${station.status}"></span></span>`,
-    iconSize: selected ? [36, 36] : [28, 28],
-    iconAnchor: selected ? [18, 18] : [14, 14],
+    html: `<span class="${className}" style="${inlineStyle}" title="${escapeAttribute(markerTitle)}">${markerContent}<span class="pin-status pin-status-${station.status}"></span></span>`,
+    iconSize: [iconWidth, iconHeight],
+    iconAnchor: [Math.round(iconWidth / 2), Math.round(iconHeight / 2)],
   });
   iconCache.set(key, icon);
   return icon;
+}
+
+function buildProviderPillMarkerContent(markerProviders) {
+  const visibleProviders = markerProviders.slice(0, 2);
+  const extraCount = markerProviders.length - visibleProviders.length;
+  const chips = visibleProviders
+    .map(
+      ({ providerName, profile, label }) => {
+        const compactLabel = String(label || "").trim().length > 3 ? getOperatorInitials(providerName).slice(0, 3) : label;
+        return `<span class="pin-pill-segment" style="--pin-provider-color: ${profile.brandColor}; --pin-provider-text: ${profile.brandTextColor};">${escapeHtml(compactLabel)}</span>`;
+      },
+    )
+    .join("");
+  const moreChip = extraCount > 0 ? `<span class="pin-pill-more">+${extraCount}</span>` : "";
+  return `<span class="pin-pill-wrap">${chips}${moreChip}</span>`;
 }
 
 function getGoogleMapsUrl(station) {
@@ -2640,6 +2678,12 @@ function formatOperatorWord(word) {
   if (trimmed.includes("-")) return trimmed.split("-").map(formatOperatorWord).join("-");
 
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+}
+
+function getMarkerProviderLabel(providerName, profile = getProviderProfile(providerName)) {
+  return profile.key === "unknown"
+    ? getOperatorInitials(providerName)
+    : profile.markerLabel || getOperatorInitials(providerName);
 }
 
 function getOperatorInitials(operatorName) {
