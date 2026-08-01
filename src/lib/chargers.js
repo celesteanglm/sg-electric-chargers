@@ -459,6 +459,10 @@ function normalizePlugType(plug, provider = "") {
     priceType: cleanString(plug.priceType || plug.PriceType || ""),
     provider: cleanString(provider),
     providerKey: provider ? getProviderKey(provider) : "unknown",
+    connectors: toArray(plug.evIds || plug.EvIds || plug.evIDs || plug.EvIDs).map((connector) => ({
+      id: cleanString(connector.evCpId || connector.EvCpId || connector.id || connector.Id || ""),
+      status: normalizeConnectorStatus(connector.status ?? connector.Status),
+    })),
   };
 }
 

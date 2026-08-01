@@ -794,10 +794,13 @@ button {
 
 .pin {
   position: relative;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 32px;
+  height: 24px;
+  padding: 0 2px;
   color: var(--provider-text, #ffffff);
   background: #ffffff;
   border: 2px solid var(--provider-color, #17201c);
@@ -810,16 +813,58 @@ button {
   letter-spacing: 0;
 }
 
+.pin-single {
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
 .pin-label {
   display: grid;
   place-items: center;
-  width: 19px;
-  height: 19px;
+  width: 16px;
+  height: 16px;
   color: var(--provider-text, #ffffff);
   background: var(--provider-color, #17201c);
   border-radius: 999px;
   line-height: 1;
   text-align: center;
+}
+
+.pin-pill-wrap {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+}
+
+.pin-pill-segment,
+.pin-pill-more {
+  display: grid;
+  place-items: center;
+  min-width: 10px;
+  height: 13px;
+  padding: 0 3px;
+  font-size: 8px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.pin-pill-segment {
+  color: var(--pin-provider-text, #ffffff);
+  background: var(--pin-provider-color, #17201c);
+}
+
+.pin-pill-segment + .pin-pill-segment,
+.pin-pill-segment + .pin-pill-more {
+  border-left: 1px solid rgba(255, 255, 255, 0.46);
+}
+
+.pin-pill-more {
+  color: #2b3b35;
+  background: #e9f0ed;
 }
 
 .pin-logo {
@@ -837,8 +882,9 @@ button {
 }
 
 .pin.selected {
-  width: 36px;
-  height: 36px;
+  min-width: 40px;
+  height: 30px;
+  padding: 0 3px;
   border-color: var(--amber);
   box-shadow:
     0 0 0 4px rgba(255, 212, 59, 0.34),
@@ -846,9 +892,34 @@ button {
   font-size: 10px;
 }
 
+.pin.selected.pin-single {
+  min-width: 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
 .pin.selected .pin-label {
+  width: 20px;
+  height: 20px;
+}
+
+.pin-single .pin-label {
+  width: 19px;
+  height: 19px;
+}
+
+.pin.selected.pin-single .pin-label {
   width: 25px;
   height: 25px;
+}
+
+.pin.selected .pin-pill-segment,
+.pin.selected .pin-pill-more {
+  min-width: 12px;
+  height: 15px;
+  padding: 0 4px;
+  font-size: 9px;
 }
 
 .pin.selected .pin-logo {
@@ -1261,20 +1332,47 @@ button {
   min-width: 0;
 }
 
-.connector-strip {
+.plug-rows {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.connector-strip span {
-  padding: 7px 9px;
-  color: #17352f;
+.plug-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
   background: #f4fbf8;
   border: 1px solid #d6e9e1;
   border-radius: 8px;
+}
+
+.plug-type-label {
+  color: #17352f;
   font-size: 12px;
   font-weight: 800;
+}
+
+.plug-speed {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.plug-status-count {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.plug-price {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .detail-actions {
