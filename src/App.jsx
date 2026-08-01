@@ -5,8 +5,11 @@ import "leaflet.markercluster/dist/MarkerCluster.css";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import {
   ArrowLeft,
+  ArrowUpDown,
+  BadgeDollarSign,
   BatteryCharging,
   Cable,
+  Check,
   ChevronLeft,
   ChevronRight,
   ChevronsUp,
@@ -24,7 +27,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import { getStationPriceKwh, normalizeChargerStations } from "./lib/chargers.js";
+import { compareComparableStationTariffs, getComparableStationTariff, normalizeChargerStations } from "./lib/chargers.js";
 import { trackPageView } from "./lib/analytics.js";
 import { PLACE_SEARCH_RADIUS_METERS, buildSearchQuery, rankStationSearchMatches } from "./lib/search.js";
 import { getProviderAppTarget, getProviderProfile, openProviderApp } from "./data/providerApps.js";
@@ -194,10 +197,14 @@ function ChargerMapPage({ onNavigate }) {
   const [mapCenter, setMapCenter] = useState(SINGAPORE_CENTER);
   const [mapBounds, setMapBounds] = useState(null);
   const [resultPage, setResultPage] = useState(1);
+  const [sortMode, setSortMode] = useState("nearby");
+  const [estimateKwh, setEstimateKwh] = useState("40");
+  const [priceDistanceKm, setPriceDistanceKm] = useState("5");
   const [locationNotice, setLocationNotice] = useState("");
   const [sheetMode, setSheetMode] = useState(getInitialSheetMode);
   const [sheetHasUserInteracted, setSheetHasUserInteracted] = useState(false);
   const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const [sortPanelOpen, setSortPanelOpen] = useState(false);
   const filterBarRef = useRef(null);
   const mapRef = useRef(null);
   const sheetRef = useRef(null);
@@ -219,13 +226,18 @@ function ChargerMapPage({ onNavigate }) {
   const activeAreaIds = useMemo(() => new Set(selectedFilters.areas), [selectedFilters.areas]);
   const activeOperatorIds = useMemo(() => new Set(selectedFilters.operators), [selectedFilters.operators]);
   const activeConnectorTypeIds = useMemo(() => new Set(selectedFilters.connectorTypes), [selectedFilters.connectorTypes]);
-  const priceStats = useMemo(() => buildPriceStats(stations), [stations]);
+  const tariffOptions = useMemo(
+    () => ({ connectorTypeIds: selectedFilters.connectorTypes, fastOnly: selectedFilters.fastOnly }),
+    [selectedFilters.connectorTypes, selectedFilters.fastOnly],
+  );
+  const priceStats = useMemo(() => buildPriceStats(stations, tariffOptions), [stations, tariffOptions]);
   const priceCurrencyPrefix = selectedCountry === "my" ? "RM" : "S$";
   const hasKnownPrices = priceStats.max != null;
+  const priceDistanceFilterActive = selectedCountry === "sg" && sortMode === "price" && priceDistanceKm !== "all";
   const priceFilterCount = (selectedFilters.maxPriceKwh ? 1 : 0) + (selectedFilters.includeUnknownPrices ? 0 : 1);
   const extendedFilterCount =
     selectedFilters.areas.length + selectedFilters.operators.length + selectedFilters.connectorTypes.length + priceFilterCount;
-  const allFiltersActive = !hasActiveFilters(selectedFilters);
+  const allFiltersActive = !hasActiveFilters(selectedFilters) && !priceDistanceFilterActive;
   const utilityFilterCounts = useMemo(
     () => ({
       all: stations.length,
@@ -443,12 +455,33 @@ function ChargerMapPage({ onNavigate }) {
     if (searchOrigin) return getNearbyStationCandidates(stations, searchOrigin);
     return textSearchMatches.map((match) => match.station);
   }, [searchOrigin, searchQuery.active, stations, textSearchMatches]);
+  const rankingOrigin = searchOrigin || userLocation || mapCenter;
   const filteredStations = useMemo(
     () =>
-      searchCandidates.filter((station) =>
-        stationPassesFilters(station, selectedFilters, activeAreaIds, activeOperatorIds, activeConnectorTypeIds, selectedCountry),
-      ),
-    [activeAreaIds, activeConnectorTypeIds, activeOperatorIds, searchCandidates, selectedCountry, selectedFilters],
+      searchCandidates.filter((station) => {
+        const matchesSelectedFilters = stationPassesFilters(
+          station,
+          selectedFilters,
+          activeAreaIds,
+          activeOperatorIds,
+          activeConnectorTypeIds,
+          selectedCountry,
+        );
+        if (!matchesSelectedFilters || !priceDistanceFilterActive) return matchesSelectedFilters;
+
+        return getDistanceMeters(rankingOrigin, [station.latitude, station.longitude]) <= Number(priceDistanceKm) * 1000;
+      }),
+    [
+      activeAreaIds,
+      activeConnectorTypeIds,
+      activeOperatorIds,
+      priceDistanceFilterActive,
+      priceDistanceKm,
+      rankingOrigin,
+      searchCandidates,
+      selectedCountry,
+      selectedFilters,
+    ],
   );
 
   // Viewport culling — only render markers visible on the map (with padding buffer)
@@ -469,15 +502,27 @@ function ChargerMapPage({ onNavigate }) {
   }, [selectedFilters]);
 
   const hiddenSearchMatchCount = searchQuery.active ? Math.max(0, searchCandidates.length - filteredStations.length) : 0;
-  const rankingOrigin = searchOrigin || userLocation || mapCenter;
   const rankedStations = useMemo(
-    () =>
-      rankStationsByDistance(
+    () => {
+      const nearbyRankedStations = rankStationsByDistance(
         rankingOrigin,
         filteredStations,
         searchQuery.active && !searchOrigin ? textSearchScoreById : null,
-      ),
-    [filteredStations, rankingOrigin, searchOrigin, searchQuery.active, textSearchScoreById],
+      ).map((item, nearbyRank) => ({
+        ...item,
+        nearbyRank,
+        tariff: getComparableStationTariff(item.station, tariffOptions),
+      }));
+
+      if (sortMode !== "price") return nearbyRankedStations;
+
+      return nearbyRankedStations.sort((a, b) => {
+        const tariffComparison = compareComparableStationTariffs(a.tariff, b.tariff);
+        if (tariffComparison !== 0) return tariffComparison;
+        return a.nearbyRank - b.nearbyRank;
+      });
+    },
+    [filteredStations, rankingOrigin, searchOrigin, searchQuery.active, sortMode, tariffOptions, textSearchScoreById],
   );
 
   const pageCount = Math.max(1, Math.ceil(rankedStations.length / RESULT_PAGE_SIZE));
@@ -495,7 +540,13 @@ function ChargerMapPage({ onNavigate }) {
       : "0";
   const resultSummary = [
     `Showing ${resultRangeLabel} of ${formatCompactCount(rankedStations.length)}`,
-    searchPlace ? `nearest to ${searchPlace.label}` : userLocation ? "nearest to you" : "tap location for distance",
+    sortMode === "price"
+      ? `lowest matching price first${priceDistanceFilterActive ? ` within ${priceDistanceKm} km` : ""}`
+      : searchPlace
+        ? `nearest to ${searchPlace.label}`
+        : userLocation
+          ? "nearest to you"
+          : "tap location for distance",
     placeSearchStatus === "loading" ? "checking place" : "",
   ]
     .filter(Boolean)
@@ -591,16 +642,20 @@ function ChargerMapPage({ onNavigate }) {
   }, [areaFilters, connectorTypeFilters, operatorFilters, stations.length]);
 
   useEffect(() => {
-    if (!filterPanelOpen) return;
+    if (!filterPanelOpen && !sortPanelOpen) return;
 
     function handleClickOutside(event) {
       if (filterBarRef.current && !filterBarRef.current.contains(event.target)) {
         setFilterPanelOpen(false);
+        setSortPanelOpen(false);
       }
     }
 
     function handleKeyDown(event) {
-      if (event.key === "Escape") setFilterPanelOpen(false);
+      if (event.key === "Escape") {
+        setFilterPanelOpen(false);
+        setSortPanelOpen(false);
+      }
     }
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -609,7 +664,7 @@ function ChargerMapPage({ onNavigate }) {
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [filterPanelOpen]);
+  }, [filterPanelOpen, sortPanelOpen]);
 
   useEffect(() => {
     if (applyingLocationAreaFilter.current) {
@@ -624,7 +679,7 @@ function ChargerMapPage({ onNavigate }) {
 
   useEffect(() => {
     setResultPage(1);
-  }, [rankingOrigin, query, selectedFilters]);
+  }, [query, rankingOrigin, selectedFilters, sortMode]);
 
   useEffect(() => {
     setResultPage((currentPage) => Math.min(Math.max(currentPage, 1), pageCount));
@@ -698,6 +753,10 @@ function ChargerMapPage({ onNavigate }) {
     setMapBounds(null);
     setMapCenter(COUNTRY_CONFIGS[countryId].center);
     setResultPage(1);
+    setSortMode("nearby");
+    setEstimateKwh("40");
+    setPriceDistanceKm("5");
+    setSortPanelOpen(false);
     setLocationNotice("");
   }
 
@@ -722,6 +781,45 @@ function ChargerMapPage({ onNavigate }) {
       setSelectedId(firstStationOnPage.id);
     }
   }, [pageCount, rankedStations]);
+
+  function handleSortModeChange(nextSortMode) {
+    if (nextSortMode === sortMode || (nextSortMode === "price" && !hasKnownPrices)) return;
+
+    setSortMode(nextSortMode);
+    setResultPage(1);
+    setSelectionMode("auto");
+  }
+
+  function selectSortMode(nextSortMode) {
+    handleSortModeChange(nextSortMode);
+    setSortPanelOpen(false);
+  }
+
+  function toggleFilterPanel() {
+    setFilterPanelOpen((current) => !current);
+    setSortPanelOpen(false);
+  }
+
+  function toggleSortPanel() {
+    setSortPanelOpen((current) => !current);
+    setFilterPanelOpen(false);
+  }
+
+  function handleEstimateKwhChange(event) {
+    setEstimateKwh(event.target.value);
+  }
+
+  function handleEstimateKwhBlur() {
+    const parsedValue = Number.parseFloat(estimateKwh);
+    const nextValue = Number.isFinite(parsedValue) ? Math.min(200, Math.max(1, parsedValue)) : 40;
+    setEstimateKwh(String(nextValue));
+  }
+
+  function handlePriceDistanceChange(event) {
+    setPriceDistanceKm(event.target.value);
+    setResultPage(1);
+    setSelectionMode("auto");
+  }
 
   function handleLocateMe() {
     if (isLocating) return;
@@ -1138,6 +1236,7 @@ function ChargerMapPage({ onNavigate }) {
   const topNotice = locationNotice || searchNotice;
   function clearFilters() {
     updateSelectedFilters(createAllFilterState());
+    setPriceDistanceKm("all");
   }
 
   function toggleQuickFilter(stateKey) {
@@ -1293,7 +1392,7 @@ function ChargerMapPage({ onNavigate }) {
             <button
               className={extendedFilterCount > 0 ? "filter-panel-toggle has-filters" : "filter-panel-toggle"}
               type="button"
-              onClick={() => setFilterPanelOpen((v) => !v)}
+              onClick={toggleFilterPanel}
               aria-expanded={filterPanelOpen}
               aria-label="Open area, operator, and connector filters"
             >
@@ -1301,7 +1400,92 @@ function ChargerMapPage({ onNavigate }) {
               More
               {extendedFilterCount > 0 ? <span className="filter-badge">{extendedFilterCount}</span> : null}
             </button>
+            {selectedCountry === "sg" ? (
+              <div className="sort-menu">
+                <button
+                  className={sortPanelOpen || sortMode === "price" ? "sort-menu-toggle active" : "sort-menu-toggle"}
+                  type="button"
+                  onClick={toggleSortPanel}
+                  aria-haspopup="menu"
+                  aria-expanded={sortPanelOpen}
+                  aria-label={`Sort charger results. Current order: ${sortMode === "price" ? "Lowest price" : "Distance"}`}
+                >
+                  <ArrowUpDown size={13} aria-hidden="true" />
+                  <span className="sort-button-prefix">Sort:</span>
+                  <span>{sortMode === "price" ? "Price" : "Distance"}</span>
+                </button>
+
+                {sortPanelOpen ? (
+                  <div className="sort-popover" role="menu" aria-label="Sort charger results">
+                    <button
+                      className={sortMode === "nearby" ? "sort-option active" : "sort-option"}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sortMode === "nearby"}
+                      onClick={() => selectSortMode("nearby")}
+                    >
+                      <span className="sort-option-icon" aria-hidden="true"><MapPin size={16} /></span>
+                      <span className="sort-option-copy">
+                        <strong>Distance</strong>
+                        <small>Closest to you, your search, or the map center</small>
+                      </span>
+                      {sortMode === "nearby" ? <Check size={16} aria-hidden="true" /> : null}
+                    </button>
+                    <button
+                      className={sortMode === "price" ? "sort-option active" : "sort-option"}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sortMode === "price"}
+                      onClick={() => selectSortMode("price")}
+                      disabled={!hasKnownPrices}
+                    >
+                      <span className="sort-option-icon price" aria-hidden="true"><BadgeDollarSign size={16} /></span>
+                      <span className="sort-option-copy">
+                        <strong>Lowest price</strong>
+                        <small>Cheapest available matching tariff first</small>
+                      </span>
+                      {sortMode === "price" ? <Check size={16} aria-hidden="true" /> : null}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
+
+          {selectedCountry === "sg" && sortMode === "price" ? (
+            <div className="price-estimator top-price-estimator">
+              <div className="estimate-control">
+                <span className="estimate-icon" aria-hidden="true">
+                  <BadgeDollarSign size={17} />
+                </span>
+                <label htmlFor="charge-estimate-kwh">Estimate</label>
+                <input
+                  id="charge-estimate-kwh"
+                  type="number"
+                  inputMode="decimal"
+                  min="1"
+                  max="200"
+                  step="5"
+                  value={estimateKwh}
+                  onChange={handleEstimateKwhChange}
+                  onBlur={handleEstimateKwhBlur}
+                  aria-label="Estimated charge energy in kilowatt-hours"
+                  aria-describedby="charge-estimate-note"
+                />
+                <span>kWh</span>
+              </div>
+              <label className="distance-control" htmlFor="price-distance-km">
+                <span>Within</span>
+                <select id="price-distance-km" value={priceDistanceKm} onChange={handlePriceDistanceChange}>
+                  <option value="2">2 km</option>
+                  <option value="5">5 km</option>
+                  <option value="10">10 km</option>
+                  <option value="all">All distances</option>
+                </select>
+              </label>
+              <p id="charge-estimate-note">Charging energy only · Distance from {distanceSourceLabel || "map center"} · Other fees excluded</p>
+            </div>
+          ) : null}
 
           {filterPanelOpen ? (
             <div className="filter-panel" aria-label="Extended filters">
@@ -1390,6 +1574,7 @@ function ChargerMapPage({ onNavigate }) {
               </div>
             </div>
           ) : null}
+
           </div>
 
           {topNotice ? <div className="location-notice">{topNotice}</div> : null}
@@ -1458,12 +1643,12 @@ function ChargerMapPage({ onNavigate }) {
             <span>{feedUpdatedLabel}</span>
           </div>
 
-          {selectedStation ? <CompactStationSummary station={selectedStation} /> : null}
+          {selectedStation ? <CompactStationSummary station={selectedStation} tariffOptions={tariffOptions} /> : null}
 
           {feed.warning ? <div className="feed-warning">{feed.warning}</div> : null}
 
           {selectedStation ? (
-            <StationDetail station={selectedStation} />
+            <StationDetail station={selectedStation} estimateKwh={estimateKwh} tariffOptions={tariffOptions} />
           ) : (
             <div className="empty-state">
               <CircleDot size={22} />
@@ -1472,7 +1657,9 @@ function ChargerMapPage({ onNavigate }) {
                   ? `${formatCompactCount(hiddenSearchMatchCount)} matching chargers are hidden by the current filters.`
                   : placeSearchStatus === "loading"
                     ? "Looking up that place."
-                    : "No matching chargers found."}
+                    : priceDistanceFilterActive
+                      ? `No matching chargers within ${priceDistanceKm} km.`
+                      : "No matching chargers found."}
               </p>
               {hiddenSearchMatchCount > 0 ? (
                 <button className="show-more-button empty-action" type="button" onClick={clearFilters}>
@@ -1482,14 +1669,17 @@ function ChargerMapPage({ onNavigate }) {
             </div>
           )}
 
-          <div className="nearby-header">
-            <span>{selectedCountryConfig.resultHeader}</span>
-            <span>{resultSummary}</span>
+          <div className="results-toolbar">
+            <div className="nearby-header">
+              <span>{selectedCountryConfig.resultHeader}</span>
+              <span aria-live="polite">{resultSummary}</span>
+            </div>
           </div>
 
           <div className="station-list">
-            {visibleRankedStations.map(({ station, distanceMeters }) => {
-              const distanceLabel = distanceSourceLabel ? formatDistanceMeters(distanceMeters) : "";
+            {visibleRankedStations.map(({ station, distanceMeters, tariff }) => {
+              const rowDistanceSourceLabel = distanceSourceLabel || (priceDistanceFilterActive ? "map center" : "");
+              const distanceLabel = rowDistanceSourceLabel ? formatDistanceMeters(distanceMeters) : "";
 
               return (
                 <button
@@ -1499,15 +1689,18 @@ function ChargerMapPage({ onNavigate }) {
                   onClick={() => selectStation(station)}
                 >
                   <StatusDot status={station.status} />
-                  <div>
+                  <div className="station-row-copy">
                     <strong>{station.name}</strong>
                     <span>{station.address}</span>
+                    <div className="row-facts">
+                      <ProviderBadges providers={station.providers?.length ? station.providers : [station.provider]} compact />
+                      <b>{formatStationAvailability(station)}</b>
+                      {distanceLabel ? <span className="row-distance">{distanceLabel} from {rowDistanceSourceLabel}</span> : null}
+                    </div>
                   </div>
-                  <div className="row-meta">
-                    <ProviderBadges providers={station.providers?.length ? station.providers : [station.provider]} compact />
-                    {distanceLabel ? <span className="row-distance">{distanceLabel} from {distanceSourceLabel}</span> : null}
-                    <b>{formatStationAvailability(station)}</b>
-                  </div>
+                  {selectedCountry === "sg" ? (
+                    <StationRowPrice tariff={tariff} estimateKwh={estimateKwh} showEstimate={sortMode === "price"} />
+                  ) : null}
                 </button>
               );
             })}
@@ -1829,7 +2022,7 @@ function getPerProviderStats(chargers) {
   return stats;
 }
 
-function StationDetail({ station }) {
+function StationDetail({ station, tariffOptions, estimateKwh }) {
   const providers = station.providers?.length ? station.providers : [station.provider];
   const appTargets = providers
     .map((providerName) => ({
@@ -1840,10 +2033,9 @@ function StationDetail({ station }) {
     .filter(({ target }) => target.available);
   const primaryAppTarget = appTargets.length === 0 ? getProviderAppTarget(providers[0]) : null;
   const plugTypeStats = getPlugTypeStats(station.chargers || []);
-  const bestPlug = getPrimaryStationPlug(station);
   const isMalaysia = station.country === "my";
+  const tariff = getComparableStationTariff(station, tariffOptions);
   const speedLabel = isMalaysia ? `${station.acCount || 0}/${station.dcCount || 0}` : formatStationSpeedRange(station);
-  const plugLabel = isMalaysia ? station.availabilityLabel || "TBC" : formatStationPlugTypes(station);
 
   const providerOrder = new Map(providers.map((name, i) => [getProviderProfile(name).key, i]));
   const sortedPlugTypes = [...station.plugTypes].sort((a, b) => {
@@ -1871,9 +2063,9 @@ function StationDetail({ station }) {
         {stats ? (
           <span className="plug-status-count">{stats.available}/{stats.total}</span>
         ) : null}
-        {plug.price ? (
+        {formatPlugPrice(plug, station.priceCurrency) ? (
           <span className="plug-price">
-            {plug.priceType ? `$${plug.price}/${plug.priceType}` : `$${plug.price}`}
+            {formatPlugPrice(plug, station.priceCurrency)}
           </span>
         ) : null}
       </div>
@@ -1896,7 +2088,10 @@ function StationDetail({ station }) {
       <div className="detail-grid">
         <Metric label={isMalaysia ? "Existing bays" : "Open plugs"} value={`${station.availableCount}/${station.totalCount}`} />
         <Metric label={isMalaysia ? "AC/DC" : "Speed range"} value={speedLabel} />
-        <Metric label={isMalaysia ? "Status" : "Plugs"} value={plugLabel} />
+        <Metric
+          label={isMalaysia ? "Status" : "Price"}
+          value={isMalaysia ? station.availabilityLabel || "TBC" : formatTariffRate(tariff, { includeUnit: false }) || "Unknown"}
+        />
       </div>
 
       <div className="detail-meta">
@@ -1904,15 +2099,15 @@ function StationDetail({ station }) {
           <MapPin size={15} />
           {station.position || station.operationHours || (isMalaysia ? "MEVnet public planning dataset" : "Open status follows provider feed")}
         </span>
-        {bestPlug?.price ? (
+        {tariff ? (
           <span>
             <BatteryCharging size={15} />
-            {bestPlug.priceType ? `$${bestPlug.price}/${bestPlug.priceType}` : `$${bestPlug.price}`}
+            {formatTariffContext(tariff)} · {formatTariffRate(tariff)} · {formatEstimatedChargeCost(tariff, estimateKwh)} for {formatEstimateKwh(estimateKwh)} kWh
           </span>
-        ) : station.priceKnown === false ? (
+        ) : !isMalaysia ? (
           <span>
             <Info size={15} />
-            Price unavailable
+            Price unavailable for the selected charging filters
           </span>
         ) : null}
       </div>
@@ -2076,14 +2271,13 @@ function StatusDot({ status }) {
   return <span className={`status-dot ${status}`} aria-hidden="true" />;
 }
 
-function CompactStationSummary({ station }) {
+function CompactStationSummary({ station, tariffOptions }) {
   const providers = station.providers?.length ? station.providers : [station.provider];
-  const price = getStationPriceKwh(station);
+  const tariff = getComparableStationTariff(station, tariffOptions);
   const isMalaysia = station.country === "my";
-  const currencyLabel = station.priceCurrency === "MYR" ? "RM" : "S$";
   const priceLabel =
-    price != null
-      ? `${currencyLabel}${price.toFixed(2)}/kWh`
+    tariff
+      ? formatTariffRate(tariff)
       : station.priceKnown === false
         ? "Price unknown"
         : "Price TBC";
@@ -2103,6 +2297,32 @@ function CompactStationSummary({ station }) {
       <strong>{station.name}</strong>
       <span>{[countLabel, speedLabel, priceLabel].filter(Boolean).join(" · ")}</span>
     </div>
+  );
+}
+
+function StationRowPrice({ tariff, estimateKwh, showEstimate }) {
+  if (!tariff) {
+    return (
+      <span className="row-price unknown">
+        <span>Price unknown</span>
+        <small>Check provider</small>
+      </span>
+    );
+  }
+
+  return (
+    <span className="row-price">
+      <small className="row-tariff-context">
+        {tariff.isStartingPrice ? "From · " : ""}{formatTariffContext(tariff)}
+      </small>
+      <span className="row-tariff-rate">
+        <strong>{formatTariffRate(tariff, { includeUnit: false })}</strong>
+        {tariff.price > 0 ? <small>/kWh</small> : null}
+      </span>
+      {showEstimate ? (
+        <b>≈ {formatEstimatedChargeCost(tariff, estimateKwh)} / {formatEstimateKwh(estimateKwh)} kWh</b>
+      ) : null}
+    </span>
   );
 }
 
@@ -2301,7 +2521,10 @@ function stationMatchesPrimaryAvailability(station, country = "sg") {
 }
 
 function stationPassesPriceFilter(station, selectedFilters) {
-  const price = getStationPriceKwh(station);
+  const price = getComparableStationTariff(station, {
+    connectorTypeIds: selectedFilters.connectorTypes,
+    fastOnly: selectedFilters.fastOnly,
+  })?.price;
   const maxPrice = Number.parseFloat(selectedFilters.maxPriceKwh);
   const hasMaxPrice = selectedFilters.maxPriceKwh !== "" && Number.isFinite(maxPrice);
 
@@ -2311,8 +2534,10 @@ function stationPassesPriceFilter(station, selectedFilters) {
   return price <= maxPrice;
 }
 
-function buildPriceStats(stations) {
-  const prices = stations.map(getStationPriceKwh).filter((price) => price != null);
+function buildPriceStats(stations, tariffOptions) {
+  const prices = stations
+    .map((station) => getComparableStationTariff(station, tariffOptions)?.price)
+    .filter((price) => price != null);
 
   return {
     knownCount: prices.length,
@@ -2324,6 +2549,45 @@ function buildPriceStats(stations) {
 function formatPriceAmount(value) {
   if (!Number.isFinite(value)) return "";
   return value.toFixed(2);
+}
+
+function getCurrencyPrefix(currency) {
+  return currency === "MYR" ? "RM" : "S$";
+}
+
+function formatTariffRate(tariff, { includeUnit = true } = {}) {
+  if (!tariff || !Number.isFinite(tariff.price)) return "";
+  if (tariff.price === 0) return "Free";
+
+  return `${getCurrencyPrefix(tariff.currency)}${tariff.price.toFixed(2)}${includeUnit ? "/kWh" : ""}`;
+}
+
+function formatTariffContext(tariff) {
+  if (!tariff) return "Tariff";
+
+  return [tariff.connectorType || "Plug", tariff.powerKw != null ? `${tariff.powerKw} kW` : ""].filter(Boolean).join(" · ");
+}
+
+function formatEstimateKwh(value) {
+  const parsedValue = Number.parseFloat(value);
+  if (!Number.isFinite(parsedValue)) return 40;
+  return Math.min(200, Math.max(1, parsedValue));
+}
+
+function formatEstimatedChargeCost(tariff, estimateKwh) {
+  if (!tariff || !Number.isFinite(tariff.price)) return "—";
+  if (tariff.price === 0) return "Free";
+
+  return `${getCurrencyPrefix(tariff.currency)}${(tariff.price * formatEstimateKwh(estimateKwh)).toFixed(2)}`;
+}
+
+function formatPlugPrice(plug, currency) {
+  if (!/kwh/i.test(String(plug?.priceType || ""))) return "";
+
+  const price = Number.parseFloat(plug?.price);
+  if (!Number.isFinite(price) || price <= 0) return "";
+
+  return `${getCurrencyPrefix(currency)}${price.toFixed(2)}/kWh`;
 }
 
 function formatStationAvailability(station) {
