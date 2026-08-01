@@ -1770,7 +1770,6 @@ function ClusterLayer({ stations, selectedStationId, onSelectStation }) {
   return null;
 }
 
-<<<<<<< HEAD
 function getPlugTypeStats(chargers) {
   const stats = new Map();
   for (const charger of chargers) {
