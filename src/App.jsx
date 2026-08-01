@@ -1768,11 +1768,11 @@ function getPlugTypeStats(chargers) {
   const stats = new Map();
   for (const charger of chargers) {
     const plugTypes = charger.plugTypes || [];
-    const connectors = charger.connectors || [];
     for (const plug of plugTypes) {
       const key = `${plug.providerKey}|${plug.plugType}|${plug.chargingSpeed}|${plug.powerRating}`;
       if (!stats.has(key)) stats.set(key, { available: 0, total: 0 });
       const entry = stats.get(key);
+      const connectors = plug.connectors || [];
       if (connectors.length > 0) {
         entry.available += connectors.filter((c) => c.status === "available").length;
         entry.total += connectors.length;
