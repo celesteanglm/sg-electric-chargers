@@ -9,11 +9,12 @@
     "api": "node --watch server/index.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test",
     "data:refresh": "node scripts/refresh-sample-data.mjs",
     "research:providers": "node scripts/research-providers.mjs",
     "start": "NODE_ENV=production node server/index.mjs",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
-    "check": "npm run audit:prod && npm run build"
+    "check": "npm run audit:prod && npm test && npm run build"
   },
   "keywords": [
     "bocharge",

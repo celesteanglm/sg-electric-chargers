@@ -75,12 +75,89 @@ export function normalizeMevnetStations(payload) {
 }
 
 export function getStationPriceKwh(station) {
-  const prices = toArray(station?.plugTypes)
-    .filter((plug) => /kwh/i.test(cleanString(plug.priceType)))
-    .map((plug) => Number.parseFloat(plug.price))
-    .filter((price) => Number.isFinite(price) && price >= 0);
+  return getComparableStationTariff(station)?.price ?? null;
+}
 
-  return prices.length > 0 ? Math.min(...prices) : null;
+export function getComparableStationTariff(station, { connectorTypeIds = [], fastOnly = false } = {}) {
+  const activeConnectorTypeIds = new Set(
+    [...connectorTypeIds]
+      .map((value) => normalizeComparableConnectorType(value))
+      .filter(Boolean),
+  );
+  const chargers = toArray(station?.chargers);
+  const comparablePlugs =
+    chargers.length > 0
+      ? chargers.flatMap((charger) =>
+          toArray(charger?.plugTypes).filter((plug) => {
+            const connectors = toArray(plug?.connectors);
+            if (connectors.length > 0) return connectors.some((connector) => connector?.status === "available");
+            return charger?.status === "available";
+          }),
+        )
+      : toArray(station?.plugTypes);
+  const candidates = comparablePlugs
+    .map((plug, index) => ({
+      plug,
+      index,
+      explicitFree: isExplicitFreeTariff(plug),
+      price: isExplicitFreeTariff(plug) ? 0 : Number.parseFloat(plug?.price),
+      powerKw: Number.parseFloat(plug?.chargingSpeed),
+      connectorType: normalizeComparableConnectorType(plug?.plugType),
+    }))
+    .filter(
+      ({ plug, price, explicitFree }) =>
+        (explicitFree || /kwh/i.test(cleanString(plug?.priceType))) &&
+        Number.isFinite(price) &&
+        (price > 0 || explicitFree),
+    )
+    .filter(({ connectorType }) => activeConnectorTypeIds.size === 0 || activeConnectorTypeIds.has(connectorType))
+    .filter(({ powerKw }) => !fastOnly || (Number.isFinite(powerKw) && powerKw >= 43))
+    .sort((a, b) => {
+      if (a.price !== b.price) return a.price - b.price;
+      if (a.powerKw !== b.powerKw) {
+        if (!Number.isFinite(a.powerKw)) return 1;
+        if (!Number.isFinite(b.powerKw)) return -1;
+        return b.powerKw - a.powerKw;
+      }
+      return a.index - b.index;
+    });
+
+  const best = candidates[0];
+  if (!best) return null;
+
+  return {
+    plug: best.plug,
+    price: best.price,
+    currency: station?.priceCurrency || "SGD",
+    connectorType: cleanString(best.plug?.plugType),
+    powerKw: Number.isFinite(best.powerKw) ? best.powerKw : null,
+    isStartingPrice:
+      activeConnectorTypeIds.size === 0 &&
+      !fastOnly &&
+      candidates.some((candidate) => candidate.price > best.price),
+  };
+}
+
+export function compareComparableStationTariffs(a, b) {
+  if (a && !b) return -1;
+  if (!a && b) return 1;
+  if (!a && !b) return 0;
+  return a.price - b.price;
+}
+
+function normalizeComparableConnectorType(value) {
+  return cleanString(value)
+    .replace(/^connector:/i, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function isExplicitFreeTariff(plug) {
+  return Boolean(
+    plug?.isFree === true ||
+      plug?.freeCharging === true ||
+      /\bfree\b/i.test(cleanString(plug?.priceType)),
+  );
 }
 
 export function parseMevnetDataDate(value) {
@@ -541,10 +618,13 @@ function maxPower(plugTypes) {
 }
 
 function getPriceKwh(plugTypes) {
-  const prices = plugTypes
-    .filter((plug) => /kwh/i.test(cleanString(plug.priceType)))
-    .map((plug) => Number.parseFloat(plug.price))
-    .filter((price) => Number.isFinite(price) && price >= 0);
+  const prices = plugTypes.flatMap((plug) => {
+    if (isExplicitFreeTariff(plug)) return [0];
+    if (!/kwh/i.test(cleanString(plug.priceType))) return [];
+
+    const price = Number.parseFloat(plug.price);
+    return Number.isFinite(price) && price > 0 ? [price] : [];
+  });
 
   return prices.length > 0 ? Math.min(...prices) : null;
 }
