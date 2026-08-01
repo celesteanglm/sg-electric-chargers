@@ -8,7 +8,7 @@ Security fixes are handled on the current `main` branch.
 
 Please do not open a public issue for suspected vulnerabilities, exposed credentials, or abuse paths.
 
-Report security concerns by emailing `celeste@agents.world` with:
+Report security concerns by emailing `celesteanglm@gmail.com` with:
 
 - A concise description of the issue.
 - Steps to reproduce, if applicable.
