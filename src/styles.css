@@ -420,6 +420,10 @@ button {
   border-radius: 8px;
 }
 
+.filter-controls {
+  min-width: 0;
+}
+
 .filter-quick-chips {
   display: flex;
   align-items: center;
@@ -1508,11 +1512,6 @@ button {
   transform: translateY(-1px);
 }
 
-.sort-button-prefix {
-  color: #61736b;
-  font-weight: 800;
-}
-
 .sort-popover {
   position: absolute;
   z-index: 1250;
@@ -2254,6 +2253,36 @@ button {
   .sort-menu-toggle {
     height: 30px;
     padding: 0 8px;
+  }
+
+  @media (max-width: 390px) {
+    .filter-bar,
+    .filter-quick-chips {
+      gap: 4px;
+    }
+
+    .filter-bar {
+      padding: 4px;
+    }
+
+    .chip {
+      padding: 0 5px;
+    }
+
+    .filter-panel-toggle {
+      width: 30px;
+      padding: 0;
+      justify-content: center;
+    }
+
+    .more-label {
+      display: none;
+    }
+
+    .sort-menu-toggle {
+      gap: 3px;
+      padding: 0 6px;
+    }
   }
 
   .filter-panel {

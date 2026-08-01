@@ -99,7 +99,7 @@ const QUICK_FILTERS = [
   {
     id: "available",
     stateKey: "availableOnly",
-    label: "Available now",
+    label: "Available",
     Icon: BatteryCharging,
     color: "#18bf73",
     textColor: "#073825",
@@ -249,9 +249,9 @@ function ChargerMapPage({ onNavigate }) {
   const quickFilters = useMemo(
     () =>
       QUICK_FILTERS.filter((item) => selectedCountry === "sg" || item.id !== "fast").map((item) =>
-        item.id === "available" ? { ...item, label: selectedCountryConfig.availabilityFilterLabel } : item,
+        item.id === "available" ? { ...item, label: "Available" } : item,
       ),
-    [selectedCountry, selectedCountryConfig.availabilityFilterLabel],
+    [selectedCountry],
   );
 
   useEffect(() => {
@@ -1368,7 +1368,7 @@ function ChargerMapPage({ onNavigate }) {
             ))}
           </div>
 
-          <div ref={filterBarRef}>
+          <div className="filter-controls" ref={filterBarRef}>
           <div className="filter-bar" aria-label="Charger filters">
             <div className="filter-quick-chips">
               <UtilityFilterChip
@@ -1397,7 +1397,7 @@ function ChargerMapPage({ onNavigate }) {
               aria-label="Open area, operator, and connector filters"
             >
               <SlidersHorizontal size={13} aria-hidden="true" />
-              More
+              <span className="more-label">More</span>
               {extendedFilterCount > 0 ? <span className="filter-badge">{extendedFilterCount}</span> : null}
             </button>
             {selectedCountry === "sg" ? (
@@ -1411,7 +1411,6 @@ function ChargerMapPage({ onNavigate }) {
                   aria-label={`Sort charger results. Current order: ${sortMode === "price" ? "Lowest price" : "Distance"}`}
                 >
                   <ArrowUpDown size={13} aria-hidden="true" />
-                  <span className="sort-button-prefix">Sort:</span>
                   <span>{sortMode === "price" ? "Price" : "Distance"}</span>
                 </button>
 
