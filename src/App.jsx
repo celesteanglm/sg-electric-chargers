@@ -855,7 +855,6 @@ function ChargerMapPage({ onNavigate }) {
 
   function handleUserPosition(position, { focusNearest }) {
     const nextLocation = [position.coords.latitude, position.coords.longitude];
-    const locationAccuracyLabel = formatAccuracyMeters(position.coords.accuracy);
     const locationArea =
       selectedCountry === "sg" ? getStationArea({ latitude: nextLocation[0], longitude: nextLocation[1] }, selectedCountry) : null;
     const nextFilters = locationArea ? applyAreaFilter(selectedFiltersRef.current, locationArea.id) : selectedFiltersRef.current;
@@ -905,15 +904,7 @@ function ChargerMapPage({ onNavigate }) {
     setResultPage(1);
     setSheetHasUserInteracted(true);
     setSheetMode("expanded");
-    setLocationNotice(
-      [
-        areaFilterChanged && locationArea ? `Switched area filter to ${locationArea.label}.` : "",
-        "Tracking your location and selected the closest charger in the current filtered list.",
-        locationAccuracyLabel ? `Accuracy: ${locationAccuracyLabel}.` : "",
-      ]
-        .filter(Boolean)
-        .join(" "),
-    );
+    setLocationNotice("");
     zoomToLocationAndStation(mapRef.current, nextLocation, nearestStation);
   }
 
