@@ -85,6 +85,19 @@ button {
   max-width: 676px;
 }
 
+.top-panel.filters-open {
+  max-height: calc(100dvh - max(16px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.filters-open .filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 .brand-row,
 .search-box,
 .filter-bar {
@@ -460,6 +473,10 @@ button {
     border-color 140ms ease;
 }
 
+.filter-panel-toggle > svg {
+  flex-shrink: 0;
+}
+
 .filter-panel-toggle:hover {
   background: rgba(8, 40, 63, 0.1);
   box-shadow: 0 4px 10px rgba(8, 40, 63, 0.09);
@@ -472,6 +489,7 @@ button {
 }
 
 .filter-badge {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2277,6 +2295,11 @@ button {
       justify-content: center;
     }
 
+    .filter-panel-toggle.has-filters {
+      width: auto;
+      padding: 0 5px;
+    }
+
     .more-label {
       display: none;
     }
@@ -2287,11 +2310,8 @@ button {
     }
   }
 
-  .filter-panel {
-    max-height: calc(100dvh - 382px - max(12px, env(safe-area-inset-bottom)));
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(8, 40, 63, 0.18) transparent;
+  .top-panel.filters-open {
+    max-height: calc(100dvh - max(16px, env(safe-area-inset-top)) - max(176px, calc(162px + env(safe-area-inset-bottom))));
   }
 
   .filter-divider {
