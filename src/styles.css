@@ -411,6 +411,8 @@ button {
 }
 
 .filter-bar {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2629,5 +2631,18 @@ button {
 
   .detail-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-height: 640px) {
+  .sort-popover {
+    top: auto;
+    bottom: calc(100% + 8px);
+  }
+
+  .sort-popover::before {
+    top: auto;
+    bottom: -5px;
+    transform: rotate(225deg);
   }
 }
