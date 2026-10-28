@@ -249,7 +249,9 @@ function ChargerMapPage({ onNavigate }) {
   const quickFilters = useMemo(
     () =>
       QUICK_FILTERS.filter((item) => selectedCountry === "sg" || item.id !== "fast").map((item) =>
-        item.id === "available" ? { ...item, label: "Available" } : item,
+        item.id === "available"
+          ? { ...item, label: selectedCountry === "my" ? COUNTRY_CONFIGS.my.availabilityFilterLabel : "Available" }
+          : item,
       ),
     [selectedCountry],
   );
@@ -796,6 +798,9 @@ function ChargerMapPage({ onNavigate }) {
   }
 
   function toggleFilterPanel() {
+    if (!filterPanelOpen && window.matchMedia(MOBILE_SHEET_QUERY).matches) {
+      setSheetMode("collapsed");
+    }
     setFilterPanelOpen((current) => !current);
     setSortPanelOpen(false);
   }
@@ -1276,7 +1281,7 @@ function ChargerMapPage({ onNavigate }) {
   return (
     <main className="app-shell">
       <section className="map-stage" aria-label={`${selectedCountryConfig.label} EV charger map`}>
-        <div className="top-panel">
+        <div className={filterPanelOpen ? "top-panel filters-open" : "top-panel"}>
           <div className="brand-row">
             <div className="brand-mark" aria-hidden="true">
               <img src="/brand/bocharge-logo.png" alt="" />
@@ -1385,7 +1390,7 @@ function ChargerMapPage({ onNavigate }) {
               type="button"
               onClick={toggleFilterPanel}
               aria-expanded={filterPanelOpen}
-              aria-label="Open area, operator, and connector filters"
+              aria-label={`Open ${selectedCountry === "my" ? "state" : "area"}, operator, and connector filters`}
             >
               <SlidersHorizontal size={13} aria-hidden="true" />
               <span className="more-label">More</span>
